@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.12)
 
 project(
   circular-buffer
-  VERSION 0.6.0
+  VERSION 0.0.0
   LANGUAGES CXX
   DESCRIPTION "A simple C++ circular buffer written in C++20")
 
