@@ -43,7 +43,7 @@ public:
     CircularBuffer(CircularBuffer&&) noexcept            = default;
     CircularBuffer& operator=(CircularBuffer&&) noexcept = default;
 
-    CircularBuffer(const CircularBuffer& other)
+    CircularBuffer(const CircularBuffer& other) noexcept
         requires std::copyable<T>
         : m_buffer{ std::make_unique<T[]>(other.m_capacity) }
         , m_capacity{ other.m_capacity }
@@ -53,17 +53,17 @@ public:
         std::copy(other.m_buffer.get(), other.m_buffer.get() + other.m_capacity, m_buffer.get());
     }
 
-    CircularBuffer& operator=(CircularBuffer other)
+    CircularBuffer& operator=(CircularBuffer other) noexcept
         requires std::copyable<T>
     {
         swap(other);
         return *this;
     }
 
-    std::size_t        capacity() const noexcept { return m_capacity; }
-    std::span<const T> buf() const noexcept { return { m_buffer.get(), capacity() }; }
+    [[nodiscard]] std::size_t        capacity() const noexcept { return m_capacity; }
+    [[nodiscard]] std::span<const T> buf() const noexcept { return { m_buffer.get(), capacity() }; }
 
-    std::size_t size() const noexcept
+    [[nodiscard]] std::size_t size() const noexcept
     {
         return m_end == npos ? capacity() : (m_end + capacity() - m_begin) % capacity();
     }
@@ -93,7 +93,7 @@ public:
         return { this, current };
     }
 
-    std::optional<T> pop() noexcept
+    [[nodiscard]] std::optional<T> pop() noexcept
     {
         if (size() == 0) {
             return std::nullopt;
@@ -110,7 +110,7 @@ public:
         return event;
     }
 
-    CircularBuffer& linearize()
+    CircularBuffer& linearize() noexcept
     {
         if (m_begin == 0 && m_end == npos) {
             return *this;
@@ -124,7 +124,7 @@ public:
         return *this;
     }
 
-    CircularBuffer linearizeCopy() const
+    [[nodiscard]] CircularBuffer linearizeCopy() const noexcept
         requires std::copyable<T>
     {
         CircularBuffer result{ m_capacity };
@@ -168,7 +168,7 @@ public:
     }
 
     // ResizePolicy only used when newCapacity < capacity()
-    void resize(std::size_t newCapacity, ResizePolicy policy = ResizePolicy::DISCARD_OLD)
+    void resize(std::size_t newCapacity, ResizePolicy policy = ResizePolicy::DISCARD_OLD) noexcept
     {
         if (newCapacity == capacity()) {
             return;
@@ -225,12 +225,12 @@ public:
         m_end      = count <= newCapacity ? count : npos;
     }
 
-    Iterator<>     begin() noexcept { return { this, m_begin }; }
-    Iterator<>     end() noexcept { return { this, m_end }; }
-    Iterator<true> begin() const noexcept { return { this, m_begin }; }
-    Iterator<true> end() const noexcept { return { this, m_end }; }
-    Iterator<true> cbegin() const noexcept { return { this, m_begin }; }
-    Iterator<true> cend() const noexcept { return { this, m_end }; }
+    [[nodiscard]] Iterator<>     begin() noexcept { return { this, m_begin }; }
+    [[nodiscard]] Iterator<>     end() noexcept { return { this, m_end }; }
+    [[nodiscard]] Iterator<true> begin() const noexcept { return { this, m_begin }; }
+    [[nodiscard]] Iterator<true> end() const noexcept { return { this, m_end }; }
+    [[nodiscard]] Iterator<true> cbegin() const noexcept { return { this, m_begin }; }
+    [[nodiscard]] Iterator<true> cend() const noexcept { return { this, m_end }; }
 
 private:
     std::unique_ptr<T[]> m_buffer;

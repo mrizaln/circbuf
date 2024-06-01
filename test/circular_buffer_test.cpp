@@ -316,8 +316,8 @@ int main()
         for (int i = 1; i <= 7; ++i) {
             circ.push(std::move(i));
         }
-        circ.pop();
-        circ.pop();
+        std::ignore = circ.pop();
+        std::ignore = circ.pop();
 
         ut::expect(sr::equal(circ.buf(), internalBuf));
         ut::expect(sr::equal(circ, outwardAppear));
@@ -351,8 +351,8 @@ int main()
         for (int i = 1; i <= 6; ++i) {
             circ.push(NonTrivialType{ i });
         }
-        circ.pop();
-        circ.pop();
+        std::ignore = circ.pop();
+        std::ignore = circ.pop();
 
         ut::expect(sr::equal(circ.buf(), buf));
 
@@ -417,8 +417,8 @@ int main()
         for (int i = 1; i <= 6; ++i) {
             circ.push(NonTrivialType{ i });
         }
-        circ.pop();
-        circ.pop();
+        std::ignore = circ.pop();
+        std::ignore = circ.pop();
 
         ut::expect(circ.size() == 3_ull);
         ut::expect(sr::equal(circ.buf(), buf));
@@ -444,8 +444,8 @@ int main()
         for (int i = 1; i <= 6; ++i) {
             circ.push(NonTrivialType{ i });
         }
-        circ.pop();
-        circ.pop();
+        std::ignore = circ.pop();
+        std::ignore = circ.pop();
 
         ut::expect(circ.size() == 3_ull);
         ut::expect(sr::equal(circ.buf(), buf));
@@ -466,8 +466,8 @@ int main()
         for (int i = 1; i <= 7; ++i) {
             circ.push(std::move(i));
         }
-        circ.pop();
-        circ.pop();
+        std::ignore = circ.pop();
+        std::ignore = circ.pop();
 
         ut::expect(circ.size() == 3_ull);
         ut::expect(sr::equal(circ.buf(), buf));
@@ -516,7 +516,7 @@ int main()
             circ.push(NonTrivialType{ i });
         }
         for (int i = 1; i <= 6; ++i) {
-            circ.pop();
+            std::ignore = circ.pop();
         }
 
         ut::expect(circ.size() == 4_ull);
@@ -547,7 +547,7 @@ int main()
             circ.push(NonTrivialType{ i });
         }
         for (int i = 1; i <= 3; ++i) {
-            circ.pop();
+            std::ignore = circ.pop();
         }
 
         ut::expect(circ.size() == 7_ull);
