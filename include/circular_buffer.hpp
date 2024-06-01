@@ -178,7 +178,7 @@ public:
             m_buffer   = std::make_unique<T[]>(newCapacity);
             m_capacity = newCapacity;
             m_begin    = 0;
-            m_end      = npos;
+            m_end      = 0;
 
             return;
         }
@@ -255,9 +255,8 @@ public:
     using const_reference   = const T&;
 
     // internal use
-    using Buffer  = std::conditional_t<IsConst, const CircularBuffer, CircularBuffer>;
-    using Value   = std::conditional_t<IsConst, const T, T>;
-    using IterRet = std::conditional_t<IsConst, const Iterator, Iterator>;
+    using Buffer = std::conditional_t<IsConst, const CircularBuffer, CircularBuffer>;
+    using Value  = std::conditional_t<IsConst, const T, T>;
 
     Iterator(Buffer* bufferPtr, std::size_t index)
         : m_bufferPtr{ bufferPtr }
@@ -279,7 +278,7 @@ public:
     Iterator(Iterator&&) noexcept            = default;
     Iterator& operator=(Iterator&&) noexcept = default;
 
-    IterRet& operator++()
+    Iterator& operator++()
     {
         if (m_index == Buffer::npos) {
             return *this;
@@ -296,7 +295,7 @@ public:
         return *this;
     }
 
-    IterRet operator++(int) const
+    Iterator operator++(int) const
     {
         Iterator tmp = *this;
         ++(*this);
@@ -348,3 +347,4 @@ private:
 };
 
 static_assert(std::forward_iterator<CircularBuffer<int>::Iterator<false>>);
+static_assert(std::forward_iterator<CircularBuffer<int>::Iterator<true>>);
