@@ -34,7 +34,7 @@ public:
 
     static constexpr std::size_t npos = std::numeric_limits<std::size_t>::max();
 
-    CircularBuffer(std::size_t capacity) noexcept
+    explicit CircularBuffer(std::size_t capacity) noexcept
         : m_buffer{ std::make_unique<T[]>(capacity) }
         , m_capacity{ capacity }
     {
@@ -68,14 +68,14 @@ public:
         return m_end == npos ? capacity() : (m_end + capacity() - m_begin) % capacity();
     }
 
-    Iterator<> push(T&& event) noexcept
+    Iterator<> push(T&& value) noexcept
     {
         auto current = m_begin;
 
         // this branch only taken when the buffer is not full
         if (m_end != npos) {
             current           = m_end;
-            m_buffer[current] = std::move(event);
+            m_buffer[current] = std::move(value);
             if (++m_end == capacity()) {
                 m_end = 0;
             }
@@ -84,7 +84,7 @@ public:
             }
         } else {
             current           = m_begin;
-            m_buffer[current] = std::move(event);
+            m_buffer[current] = std::move(value);
             if (++m_begin == capacity()) {
                 m_begin = 0;
             }
@@ -99,7 +99,7 @@ public:
             return std::nullopt;
         }
 
-        std::optional<T> event{ std::in_place, std::move(m_buffer[m_begin]) };
+        std::optional<T> value{ std::in_place, std::move(m_buffer[m_begin]) };
         if (m_end == npos) {
             m_end = m_begin;
         }
@@ -107,7 +107,7 @@ public:
             m_begin = 0;
         }
 
-        return event;
+        return value;
     }
 
     CircularBuffer& linearize() noexcept
