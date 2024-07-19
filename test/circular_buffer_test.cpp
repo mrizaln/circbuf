@@ -16,7 +16,7 @@ using namespace ut::literals;
 using namespace ut::operators;
 
 template <typename T>
-using CircBuffer = CircularBuffer<T>;
+using CircBuffer = circbuf::CircularBuffer<T>;
 
 struct TrivialType
 {
@@ -208,7 +208,7 @@ int main()
 
         std::vector<NonTrivialType> beforePop{
             { 6 }, { 7 }, { 3 }, { 4 }, { 5 },    // 3 is the begin/end pointer/index
-        };                                        // 7 insertion; 6, 7 will overwrite 1, 2
+        };    // 7 insertion; 6, 7 will overwrite 1, 2
         std::vector<NonTrivialType> afterPop{
             { 6 }, { 7 }, {}, { 4 }, { 5 },    // 3 is moved-from; defaulted
         };
@@ -256,7 +256,7 @@ int main()
 
         std::vector<NonTrivialType> beforePop{
             { 11 }, { 12 }, { 13 }, { 14 }, { 10 },    // begin/end at 10
-        };                                             // 14 insertion; 11, 12, 13, 14 overwrite previous val
+        };    // 14 insertion; 11, 12, 13, 14 overwrite previous val
         std::vector<NonTrivialType> afterPop{
             { 11 }, { 12 }, { 13 }, { 14 }, {},    // 10 is moved-from; defaulted
         };
