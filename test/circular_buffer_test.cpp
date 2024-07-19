@@ -1,3 +1,4 @@
+#define CIRCULAR_BUFFER_ENABLE_THROW
 #include <circbuf/circular_buffer.hpp>
 
 #include <boost/ut.hpp>
@@ -122,8 +123,6 @@ int main()
         while (circ.pop() != std::nullopt) { }
 
         ut::expect(circ.size() == 0_ull);
-        ut::expect(circ.begin() == 2_ull);
-        ut::expect(circ.end() == 2_ull);
 
         ut::expect(*circ.push(NonTrivialType{ 8 }) == NonTrivialType{ 8 });
         ut::expect(circ.size() == 1_ull);
@@ -282,16 +281,13 @@ int main()
         ut::expect(*circ.pop() == NonTrivialType{ 11 });
         ut::expect(circ.size() == 3_ull);
         ut::expect(circ.buf()[0] == NonTrivialType{}) << "pop-ed element should be reset to default";
-        ut::expect(circ.begin() == 1_ull);
-        ut::expect(circ.end() == 4_ull);
         ut::expect(sr::equal(circ.buf(), afterPopAfterPop));
 
         for (int i = 15; i <= 17; ++i) {
             circ.push(NonTrivialType{ i });
         }
         ut::expect(circ.size() == 5_ull);
-        ut::expect(static_cast<std::size_t>(circ.begin()) == 2_ull);
-        ut::expect(static_cast<std::size_t>(circ.end()) == CircBuffer<NonTrivialType>::npos);
+        ut::expect(circ.size() == circ.capacity());
         ut::expect(sr::equal(circ.buf(), afterPushPushPush));
     };
 
@@ -425,8 +421,6 @@ int main()
 
         circ.reset();
         ut::expect(circ.size() == 0_ull);
-        ut::expect(circ.begin() == 0_ull);
-        ut::expect(circ.end() == 0_ull);
         ut::expect(sr::equal(circ.buf(), buf));
 
         circ.push(NonTrivialType{ 7 });
@@ -452,8 +446,6 @@ int main()
 
         circ.clear();
         ut::expect(circ.size() == 0_ull);
-        ut::expect(circ.begin() == 0_ull);
-        ut::expect(circ.end() == 0_ull);
         ut::expect(sr::equal(circ.buf(), bufAfterClear));
     };
 
@@ -474,8 +466,6 @@ int main()
 
         circ.resize(10);
         ut::expect(circ.size() == 3_ull);
-        ut::expect(circ.begin() == 0_ull);
-        ut::expect(circ.end() == 3_ull);
         ut::expect(sr::equal(circ.buf(), bufAfterResize));
 
         ut::expect(*circ.push(NonTrivialType{ 8 }) == NonTrivialType{ 8 });
@@ -498,8 +488,6 @@ int main()
 
         circ.resize(10);
         ut::expect(circ.size() == 5_ull);
-        ut::expect(circ.begin() == 0_ull);
-        ut::expect(circ.end() == 5_ull);
         ut::expect(sr::equal(circ.buf(), bufAfterResize));
 
         ut::expect(*circ.push(NonTrivialType{ 15 }) == NonTrivialType{ 15 });
@@ -582,8 +570,6 @@ int main()
 
         circ.resize(10);
         ut::expect(circ.size() == 5_ull);
-        ut::expect(circ.begin() == 0_ull);
-        ut::expect(circ.end() == 5_ull);
         ut::expect(sr::equal(circ.buf(), bufAfterResize));
     };
 

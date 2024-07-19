@@ -4,12 +4,13 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <type_traits>
 
-#ifndef CIRCULAR_BUFFER_ENABLE_ITERATOR_THROW
-#    define CIRCULAR_BUFFER_ENABLE_ITERATOR_THROW 0
+#ifndef CIRCULAR_BUFFER_ENABLE_THROW
+#    define CIRCULAR_BUFFER_ENABLE_THROW 0
 #else
-#    undef CIRCULAR_BUFFER_ENABLE_ITERATOR_THROW
-#    define CIRCULAR_BUFFER_ENABLE_ITERATOR_THROW 1
+#    undef CIRCULAR_BUFFER_ENABLE_THROW
+#    define CIRCULAR_BUFFER_ENABLE_THROW 1
 #endif
 
 namespace circbuf
@@ -24,9 +25,6 @@ namespace circbuf
 
         friend class Iterator<false>;
         friend class Iterator<true>;
-
-        // STL compliance
-        using value_type = T;
 
         enum class ResizePolicy
         {
@@ -70,6 +68,28 @@ namespace circbuf
             return m_end == npos ? capacity() : (m_end + capacity() - m_begin) % capacity();
         }
 
+        T& at(std::size_t pos)
+        {
+#if CIRCULAR_BUFFER_ENABLE_THROW
+            if (pos >= size()) {
+                throw std::out_of_range{ "Pos index is out of range of the CircularBuffer" };
+            }
+#endif
+            auto realpos = toAbsolutePos(pos);
+            return m_buffer[realpos];
+        }
+
+        const T& at(std::size_t pos) const
+        {
+#if CIRCULAR_BUFFER_ENABLE_THROW
+            if (pos >= size()) {
+                throw std::out_of_range{ "Pos index is out of range of the CircularBuffer" };
+            }
+#endif
+            auto realpos = toAbsolutePos(pos);
+            return m_buffer[realpos];
+        }
+
         Iterator<> push(T&& value) noexcept
         {
             auto current = m_begin;
@@ -92,7 +112,7 @@ namespace circbuf
                 }
             }
 
-            return { this, current };
+            return { this, toRelativePos(current) };
         }
 
         [[nodiscard]] std::optional<T> pop() noexcept
@@ -227,14 +247,20 @@ namespace circbuf
             m_end      = count <= newCapacity ? count : npos;
         }
 
-        [[nodiscard]] Iterator<>     begin() noexcept { return { this, m_begin }; }
-        [[nodiscard]] Iterator<>     end() noexcept { return { this, m_end }; }
-        [[nodiscard]] Iterator<true> begin() const noexcept { return { this, m_begin }; }
-        [[nodiscard]] Iterator<true> end() const noexcept { return { this, m_end }; }
-        [[nodiscard]] Iterator<true> cbegin() const noexcept { return { this, m_begin }; }
-        [[nodiscard]] Iterator<true> cend() const noexcept { return { this, m_end }; }
+        [[nodiscard]] Iterator<>     begin() noexcept { return { this, 0 }; }
+        [[nodiscard]] Iterator<>     end() noexcept { return { this, npos }; }
+        [[nodiscard]] Iterator<true> begin() const noexcept { return { this, 0 }; }
+        [[nodiscard]] Iterator<true> end() const noexcept { return { this, npos }; }
+        [[nodiscard]] Iterator<true> cbegin() const noexcept { return { this, 0 }; }
+        [[nodiscard]] Iterator<true> cend() const noexcept { return { this, npos }; }
 
     private:
+        std::size_t toAbsolutePos(std::size_t pos) const noexcept { return (pos + m_begin) % capacity(); }
+        std::size_t toRelativePos(std::size_t pos) const noexcept
+        {
+            return (pos + capacity() - m_begin) % capacity();
+        }
+
         std::unique_ptr<T[]> m_buffer;
         std::size_t          m_capacity = 0;
         std::size_t          m_begin    = 0;
@@ -248,7 +274,7 @@ namespace circbuf
     {
     public:
         // STL compliance
-        using iterator_category = std::forward_iterator_tag;
+        using iterator_category = std::random_access_iterator_tag;
         using value_type        = T;
         using difference_type   = std::ptrdiff_t;
         using pointer           = T*;
@@ -257,22 +283,7 @@ namespace circbuf
         using const_reference   = const T&;
 
         // internal use
-        using Buffer = std::conditional_t<IsConst, const CircularBuffer, CircularBuffer>;
-        using Value  = std::conditional_t<IsConst, const T, T>;
-
-        Iterator(Buffer* bufferPtr, std::size_t index)
-            : m_bufferPtr{ bufferPtr }
-            , m_index{ index }
-        {
-        }
-
-        // special constructor for const iterator from non-const iterator
-        Iterator(Iterator<false>& other)
-            requires IsConst
-            : m_bufferPtr{ other.m_bufferPtr }
-            , m_index{ other.m_index }
-        {
-        }
+        using BufferPtr = std::conditional_t<IsConst, const CircularBuffer*, CircularBuffer*>;
 
         Iterator() noexcept                      = default;
         Iterator(const Iterator&)                = default;
@@ -280,72 +291,100 @@ namespace circbuf
         Iterator(Iterator&&) noexcept            = default;
         Iterator& operator=(Iterator&&) noexcept = default;
 
-        Iterator& operator++()
+        Iterator(BufferPtr buffer, std::size_t index)
+            : m_buffer{ buffer }
+            , m_index{ index }
+            , m_size{ buffer->size() }
         {
-            if (m_index == Buffer::npos) {
-                return *this;
-            }
+        }
 
-            if (++m_index == m_bufferPtr->capacity()) {
-                m_index = 0;
-            }
+        // special constructor for const iterator from non-const iterator
+        Iterator(Iterator<false>& other)
+            requires IsConst
+            : m_buffer{ other.m_buffer }
+            , m_index{ other.m_index }
+        {
+        }
 
-            if (m_index == m_index_original) {
-                m_index = Buffer::npos;
+        auto operator<=>(const Iterator&) const = default;
+
+        Iterator& operator+=(difference_type n)
+        {
+            // casted n possibly become very large if it was negative, but when it was added to m_pos, m_pos
+            // will wraparound anyway since it was unsigned
+            m_index += static_cast<std::size_t>(n);
+
+            // detect wrap-around then set to sentinel value
+            if (m_index >= m_size) {
+                m_index = CircularBuffer::npos;
             }
 
             return *this;
         }
 
+        Iterator& operator-=(difference_type n)
+        {
+            if (m_index == CircularBuffer::npos) {
+                m_index = m_size;
+            }
+            return (*this) += -n;
+        }
+
+        Iterator& operator++() { return (*this) += 1; }
+        Iterator& operator--() { return (*this) -= 1; }
+
         Iterator operator++(int)
         {
-            Iterator tmp = *this;
+            auto copy = *this;
             ++(*this);
-            return tmp;
+            return copy;
         }
 
-        Value& operator*() const
+        Iterator operator--(int)
         {
-#if CIRCULAR_BUFFER_ENABLE_ITERATOR_THROW
-            if (m_index == Buffer::npos) {
-                throw std::out_of_range{ "out of bound access; iterator has reached the end" };
+            auto copy = *this;
+            --(*this);
+            return copy;
+        }
+
+        reference operator*() const
+        {
+#if CIRCULAR_BUFFER_ENABLE_THROW
+            if (m_buffer == nullptr || m_index == CircularBuffer::npos) {
+                throw std::out_of_range{ "Out of bound access: CircularBuffer iterator has reached the end" };
             }
 #endif
+            return m_buffer->at(m_index);
+        }
 
-            return m_bufferPtr->m_buffer[m_index];
-        };
-
-        Value* operator->() const
+        pointer operator->() const
         {
-#if CIRCULAR_BUFFER_ENABLE_ITERATOR_THROW
-            if (m_index == Buffer::npos) {
-                throw std::out_of_range{ "out of bound access; iterator has reached the end" };
+#if CIRCULAR_BUFFER_ENABLE_THROW
+            if (m_buffer == nullptr || m_index == CircularBuffer::npos) {
+                throw std::out_of_range{ "Out of bound access: CircularBuffer iterator has reached the end" };
             }
 #endif
-
-            return &m_bufferPtr->m_buffer[m_index];
-        };
-
-        template <bool IsConst2>
-        bool operator==(const Iterator<IsConst2>& other) const
-        {
-            return m_bufferPtr == other.m_bufferPtr && m_index == other.m_index;
+            return &m_buffer->at(m_index);
         }
 
-        template <bool IsConst2>
-        bool operator!=(const Iterator<IsConst2>& other) const
-        {
-            return !(*this == other);
-        }
+        reference operator[](difference_type n) const { return *(*this + n); }
 
-        operator std::size_t() { return m_index; };
+        friend Iterator operator+(const Iterator& lhs, difference_type n) { return Iterator{ lhs } += n; }
+        friend Iterator operator+(difference_type n, const Iterator& rhs) { return rhs + n; }
+        friend Iterator operator-(const Iterator& lhs, difference_type n) { return Iterator{ lhs } -= n; }
+
+        friend difference_type operator-(const Iterator& lhs, const Iterator& rhs)
+        {
+            auto lpos = lhs.m_index == CircularBuffer::npos ? lhs.m_size : lhs.m_index;
+            auto rpos = rhs.m_index == CircularBuffer::npos ? rhs.m_size : rhs.m_index;
+
+            return static_cast<difference_type>(lpos) - static_cast<difference_type>(rpos);
+        }
 
     private:
-        Buffer*     m_bufferPtr = nullptr;
-        std::size_t m_index     = npos;
-
-        // workaround for when m_bufferPtr->m_begin == m_bufferPtr->m_end && size() == capacity()
-        std::size_t m_index_original = m_index;
+        BufferPtr   m_buffer = nullptr;
+        std::size_t m_index  = CircularBuffer::npos;
+        std::size_t m_size   = 0;
     };
 
     static_assert(std::forward_iterator<CircularBuffer<int>::Iterator<false>>);
