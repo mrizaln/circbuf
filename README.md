@@ -1,4 +1,4 @@
-# circular-buffer
+# circbuf
 
 A simple C++ circular buffer written in C++20
 
@@ -12,23 +12,25 @@ cmake_minimum_required(VERSION 3.14)
 include(FetchContent)
 
 FetchContent_Declare(
-  circular-buffer
-  GIT_REPOSITORY https://github.com/mrizaln/circular-buffer
+  circbuf
+  GIT_REPOSITORY https://github.com/mrizaln/circbuf
   GIT_TAG main)
-FetchContent_MakeAvailable(circular-buffer)
+FetchContent_MakeAvailable(circbuf)
 
 add_executable(main main.cpp)
-target_link_libraries(main PRIVATE circular-buffer)
+target_link_libraries(main PRIVATE circbuf)
 ```
 
 > `main.cpp`
 
 ```cpp
-#include <circular_buffer.hpp>
+#include <circbuf/circular_buffer.hpp>
 
 #include <iostream>
 #include <string>
 #include <ranges>
+
+using circbuf::CircularBuffer;
 
 void print(std::string_view prelude, std::ranges::range auto&& range)
 {
