@@ -1,4 +1,4 @@
-#include "circular_buffer.hpp"
+#include <circbuf/circular_buffer.hpp>
 
 #include <boost/ut.hpp>
 #include <fmt/format.h>
