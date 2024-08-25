@@ -1,603 +1,418 @@
-#define CIRCULAR_BUFFER_ENABLE_THROW
+#include "test_util.hpp"
+
 #include <circbuf/circular_buffer.hpp>
 
 #include <boost/ut.hpp>
-#include <fmt/format.h>
+#include <fmt/core.h>
 #include <fmt/ranges.h>
+#include <fmt/std.h>
 
-#include <span>
-#include <vector>
+#include <cassert>
 #include <ranges>
-
-namespace sr = std::ranges;
-namespace sv = std::views;
+#include <concepts>
+#include <vector>
 
 namespace ut = boost::ut;
-using namespace ut::literals;
-using namespace ut::operators;
+namespace rr = std::ranges;
+namespace rv = rr::views;
+
+using test_util::equalUnderlying;
+using test_util::populateContainer;
+using test_util::populateContainerFront;
+using test_util::subrange;
 
 template <typename T>
-using CircBuffer = circbuf::CircularBuffer<T>;
-
-struct TrivialType
+std::string compare(const circbuf::CircularBuffer<T>& buffer)
 {
-    int   m_value1;
-    float m_value2;
+    return fmt::format("{} vs u {}", buffer, std::span{ buffer.data(), buffer.capacity() });
+}
 
-    auto operator<=>(const TrivialType&) const = default;
-
-    // for fmt::format
-    friend auto          format_as(TrivialType f) { return std::tuple{ f.m_value1, f.m_value2 }; }
-    friend std::ostream& operator<<(std::ostream& os, TrivialType f)
-    {
-        return os << fmt::format("{}", format_as(f));
-    }
+constexpr auto g_policyPermutations = std::tuple{
+    circbuf::BufferPolicy{
+        circbuf::BufferCapacityPolicy::FixedCapacity,
+        circbuf::BufferStorePolicy::ReplaceOnFull,
+    },
+    circbuf::BufferPolicy{
+        circbuf::BufferCapacityPolicy::DynamicCapacity,
+        circbuf::BufferStorePolicy::ReplaceOnFull,
+    },
+    circbuf::BufferPolicy{
+        circbuf::BufferCapacityPolicy::FixedCapacity,
+        circbuf::BufferStorePolicy::ThrowOnFull,
+    },
+    circbuf::BufferPolicy{
+        circbuf::BufferCapacityPolicy::DynamicCapacity,
+        circbuf::BufferStorePolicy::ThrowOnFull,
+    },
 };
 
-struct NonTrivialType
+// TODO: check whether copy happens on operations that should not copy (unless type is not movable)
+// TODO: add test for pop_front on DynamicCapacity policy; check when will it double or halve its capacity
+// TODO: add test for edge case: 1 digit capacity
+// TODO: add test for insertion with DiscardTail policy and DynamicCapacity and ThrowOnFull + FixedCapacity
+template <test_util::TestClass Type>
+void test()
 {
-    int m_value = 0;
+    using namespace ut::operators;
+    using namespace ut::literals;
+    using ut::expect, ut::that, ut::throws, ut::nothrow;
 
-    NonTrivialType() = default;
+    Type::resetActiveInstanceCount();
 
-    NonTrivialType(int value)
-        : m_value{ value }
-    {
+    "iterator should be a random access iterator"_test = [] {
+        using Iter = circbuf::CircularBuffer<Type>::template Iterator<false>;
+        static_assert(std::random_access_iterator<Iter>);
+
+        using ConstIter = circbuf::CircularBuffer<Type>::template Iterator<true>;
+        static_assert(std::random_access_iterator<ConstIter>);
+    };
+
+    "push_back should add an element to the back"_test = [](circbuf::BufferPolicy policy) {
+        circbuf::CircularBuffer<Type> buffer{ 10, policy };    // default policy
+
+        // first push
+        auto  size  = buffer.size();
+        auto& value = buffer.push_back(42);
+        expect(that % buffer.size() == size + 1);
+        expect(value.value() == 42_i);
+        expect(buffer.back().value() == 42_i);
+        expect(buffer.front().value() == 42_i);
+
+        for (auto i : rv::iota(0, 9)) {
+            auto& value = buffer.push_back(i);
+            expect(that % value.value() == i);
+            expect(that % buffer.back().value() == i) << compare(buffer);
+            expect(that % buffer.front().value() == 42);
+        }
+
+        std::array expected{ 42, 0, 1, 2, 3, 4, 5, 6, 7, 8 };
+        expect(equalUnderlying<Type>(buffer, expected));
+
+        buffer.clear();
+        expect(buffer.size() == 0_i);
+
+        rr::fill_n(std::back_inserter(buffer), 10, 42);
+        for (const auto& value : buffer) {
+            expect(value.value() == 42_i);
+        }
+        expect(buffer.size() == 10_i);
+    } | g_policyPermutations;
+
+    "push_back with ReplaceOnFull policy should replace the adjacent element when buffer is full"_test = [] {
+        circbuf::BufferPolicy policy{
+            .m_capacity = circbuf::BufferCapacityPolicy::FixedCapacity,
+            .m_store    = circbuf::BufferStorePolicy::ReplaceOnFull,
+        };
+        circbuf::CircularBuffer<Type> buffer{ 10, policy };
+
+        // fully populate buffer
+        populateContainer(buffer, rv::iota(0, 10));
+        expect(buffer.size() == 10_i);
+        expect(that % buffer.size() == buffer.capacity());
+        expect(equalUnderlying<Type>(buffer, rv::iota(0, 10)));
+
+        // replace old elements (4 times)
+        for (auto i : rv::iota(21, 25)) {
+            auto& value = buffer.push_back(i);
+            expect(that % value.value() == i);
+            expect(that % buffer.back().value() == i);
+            expect(buffer.capacity() == 10_i);
+            expect(buffer.size() == 10_i);
+        }
+
+        // the circular-buffer iterator
+        expect(equalUnderlying<Type>(subrange(buffer, 0, 6), rv::iota(0, 10) | rv::drop(4)));
+        expect(equalUnderlying<Type>(subrange(buffer, 6, 10), rv::iota(21, 25))) << compare(buffer);
+
+        // the underlying array
+        auto underlying = std::span{ buffer.data(), buffer.capacity() };
+        expect(equalUnderlying<Type>(subrange(underlying, 0, 4), rv::iota(21, 25))) << compare(buffer);
+        expect(equalUnderlying<Type>(subrange(underlying, 4, 10), rv::iota(0, 10) | rv::drop(4)))
+            << compare(buffer);
+    };
+
+    "push_back with ThrowOnFull policy should throw when buffer is full"_test = [] {
+        circbuf::BufferPolicy policy{
+            .m_capacity = circbuf::BufferCapacityPolicy::FixedCapacity,
+            .m_store    = circbuf::BufferStorePolicy::ThrowOnFull,
+        };
+        circbuf::CircularBuffer<Type> buffer{ 10, policy };
+
+        // fully populate buffer
+        populateContainer(buffer, rv::iota(0, 10));
+        expect(buffer.size() == 10_i);
+        expect(that % buffer.size() == buffer.capacity());
+        expect(equalUnderlying<Type>(buffer, rv::iota(0, 10)));
+
+        expect(throws([&] { buffer.push_back(42); })) << "should throw when push to full buffer";
+    };
+
+    "push_back with DynamicCapacity should never replace old elements nor throws on a full buffer"_test =
+        [](circbuf::BufferStorePolicy storePolicy) {
+            circbuf::BufferPolicy policy{
+                .m_capacity = circbuf::BufferCapacityPolicy::DynamicCapacity,
+                .m_store    = storePolicy,
+            };
+            circbuf::CircularBuffer<Type> buffer{ 10, policy };
+
+            // fully populate buffer
+            populateContainer(buffer, rv::iota(0, 10));
+            expect(buffer.size() == 10_i);
+            expect(that % buffer.size() == buffer.capacity());
+            expect(equalUnderlying<Type>(buffer, rv::iota(0, 10)));
+
+            expect(nothrow([&] { buffer.push_back(42); })) << "should not throw when push to full buffer";
+            expect(buffer.back().value() == 42_i);
+            expect(buffer.size() == 11_i);
+            expect(buffer.capacity() > 10_i);
+            expect(equalUnderlying<Type>(subrange(buffer, 0, 10), rv::iota(0, 10)));
+        }
+        | std::tuple{ circbuf::BufferStorePolicy::ReplaceOnFull, circbuf::BufferStorePolicy::ThrowOnFull };
+
+    "push_front should add an element to the front"_test = [](circbuf::BufferPolicy policy) {
+        circbuf::CircularBuffer<Type> buffer{ 10, policy };    // default policy
+
+        // first push
+        auto  size  = buffer.size();
+        auto& value = buffer.push_front(42);
+        expect(that % buffer.size() == size + 1);
+        expect(value.value() == 42_i);
+        expect(buffer.front().value() == 42_i);
+        expect(buffer.back().value() == 42_i);
+
+        for (auto i : rv::iota(0, 9)) {
+            auto& value = buffer.push_front(i);
+            expect(that % value.value() == i);
+            expect(that % buffer.front().value() == i) << compare(buffer);
+            expect(that % buffer.back().value() == 42);
+        }
+
+        std::array expected{ 42, 0, 1, 2, 3, 4, 5, 6, 7, 8 };
+        expect(equalUnderlying<Type>(buffer | rv::reverse, expected)) << compare(buffer);
+
+        buffer.clear();
+        expect(buffer.size() == 0_i);
+
+        rr::fill_n(std::back_inserter(buffer), 10, 42);
+        for (const auto& value : buffer) {
+            expect(value.value() == 42_i);
+        }
+        expect(buffer.size() == 10_i);
+    } | g_policyPermutations;
+
+    "push_front with ReplaceOnFullepolicy should replace the adjacent element when buffer is full"_test = [] {
+        circbuf::BufferPolicy policy{
+            .m_capacity = circbuf::BufferCapacityPolicy::FixedCapacity,
+            .m_store    = circbuf::BufferStorePolicy::ReplaceOnFull,
+        };
+        circbuf::CircularBuffer<Type> buffer{ 10, policy };
+
+        // fully populate buffer
+        populateContainerFront(buffer, rv::iota(0, 10));
+        expect(buffer.size() == 10_i);
+        expect(that % buffer.size() == buffer.capacity());
+        expect(equalUnderlying<Type>(buffer | rv::reverse, rv::iota(0, 10))) << compare(buffer);
+
+        // replace old elements (4 times)
+        for (auto i : rv::iota(21, 25)) {
+            auto& value = buffer.push_front(i);
+            expect(that % value.value() == i);
+            expect(that % buffer.front().value() == i);
+            expect(buffer.capacity() == 10_i);
+            expect(buffer.size() == 10_i);
+        }
+
+        // the circular-buffer iterator
+        auto rbuffer = buffer | rv::reverse;
+        expect(equalUnderlying<Type>(subrange(rbuffer, 0, 6), rv::iota(0, 10) | rv::drop(4)));
+        expect(equalUnderlying<Type>(subrange(rbuffer, 6, 10), rv::iota(21, 25))) << compare(buffer);
+
+        // the underlying array
+        auto runderlying = std::span{ buffer.data(), buffer.capacity() } | rv::reverse;
+        expect(equalUnderlying<Type>(subrange(runderlying, 0, 4), rv::iota(21, 25))) << compare(buffer);
+        expect(equalUnderlying<Type>(subrange(runderlying, 4, 10), rv::iota(0, 10) | rv::drop(4)))
+            << compare(buffer);
+    };
+
+    "push_front with ThrowOnFull policy should throw when buffer is full"_test = [] {
+        circbuf::BufferPolicy policy{
+            .m_capacity = circbuf::BufferCapacityPolicy::FixedCapacity,
+            .m_store    = circbuf::BufferStorePolicy::ThrowOnFull,
+        };
+        circbuf::CircularBuffer<Type> buffer{ 10, policy };
+
+        // fully populate buffer
+        populateContainerFront(buffer, rv::iota(0, 10));
+        expect(buffer.size() == 10_i);
+        expect(that % buffer.size() == buffer.capacity());
+        expect(equalUnderlying<Type>(buffer | rv::reverse, rv::iota(0, 10))) << compare(buffer);
+
+        expect(throws([&] { buffer.push_front(42); })) << "should throw when push to full buffer";
+    };
+
+    "push_front with DynamicCapacity should never replace old elements nor throws on a full buffer"_test =
+        [](circbuf::BufferStorePolicy storePolicy) {
+            circbuf::BufferPolicy policy{
+                .m_capacity = circbuf::BufferCapacityPolicy::DynamicCapacity,
+                .m_store    = storePolicy,
+            };
+            circbuf::CircularBuffer<Type> buffer{ 10, policy };
+
+            // fully populate buffer
+            populateContainerFront(buffer, rv::iota(0, 10));
+            expect(buffer.size() == 10_i);
+            expect(that % buffer.size() == buffer.capacity());
+            expect(equalUnderlying<Type>(buffer | rv::reverse, rv::iota(0, 10))) << compare(buffer);
+
+            expect(nothrow([&] { buffer.push_front(42); })) << "should not throw when push to full buffer";
+            expect(buffer.front().value() == 42_i);
+            expect(buffer.size() == 11_i);
+            expect(buffer.capacity() > 10_i);
+            expect(equalUnderlying<Type>(subrange(buffer | rv::reverse, 0, 10), rv::iota(0, 10)));
+        }
+        | std::tuple{ circbuf::BufferStorePolicy::ReplaceOnFull, circbuf::BufferStorePolicy::ThrowOnFull };
+
+    "pop_front should remove the first element on the buffer"_test = [](circbuf::BufferPolicy policy) {
+        std::vector<int>              values = { 42, 0, 1, 2, 3, 4, 5, 6, 7, 8 };
+        circbuf::CircularBuffer<Type> buffer{ 10, policy };
+        for (auto value : values) {
+            buffer.push_back(std::move(value));
+        }
+        expect(that % buffer.size() == values.size());
+
+        // first pop
+        auto size  = buffer.size();
+        auto value = buffer.pop_front();
+        expect(that % buffer.size() == size - 1);
+        expect(value.value() == 42_i);
+
+        for (auto i : rv::iota(0, 8)) {
+            expect(buffer.pop_front().value() == i);
+        }
+        expect(buffer.size() == 1_i);
+        expect(buffer.pop_front().value() == 8_i);
+        expect(buffer.size() == 0_i);
+
+        expect(throws([&] { buffer.pop_front(); })) << "should throw when pop from empty buffer";
+    } | g_policyPermutations;
+
+    "insertion in the middle should move the elements around with FixedCapacity and ReplaceOnFull"_test = [] {
+        // full buffer condition
+        {
+            circbuf::CircularBuffer<Type> buffer{ 10 };    // default policy
+            populateContainer(buffer, rv::iota(0, 10));
+
+            buffer.insert(3, 42, circbuf::BufferInsertPolicy::DiscardHead);
+            expect(buffer.size() == 10_i);
+            expect(equalUnderlying<Type>(subrange(buffer, 0, 3), rv::iota(1, 4))) << compare(buffer);
+            expect(buffer.at(3).value() == 42_i) << compare(buffer);
+            expect(equalUnderlying<Type>(subrange(buffer, 4, 10), rv::iota(4, 10))) << compare(buffer);
+
+            auto expected = std::vector{ 1, 2, 3, 42, 4, 5, 6, 7, 8, 9 };
+            expect(equalUnderlying<Type>(buffer, expected)) << compare(buffer);
+
+            buffer.insert(0, 42, circbuf::BufferInsertPolicy::DiscardHead);
+            expected = std::vector{ 42, 2, 3, 42, 4, 5, 6, 7, 8, 9 };
+            expect(equalUnderlying<Type>(buffer, expected)) << compare(buffer);
+
+            buffer.insert(9, 32748, circbuf::BufferInsertPolicy::DiscardHead);
+            expected = std::vector{ 2, 3, 42, 4, 5, 6, 7, 8, 9, 32748 };
+            expect(equalUnderlying<Type>(buffer, expected)) << compare(buffer);
+        }
+
+        // partially filled buffer condition
+        {
+            circbuf::CircularBuffer<Type> buffer{ 10 };    // default policy
+            populateContainer(buffer, rv::iota(0, 15));
+            for (auto _ : rv::iota(0, 5)) {
+                buffer.pop_front();
+            }
+
+            auto expected = std::vector{ 10, 11, 12, 13, 14 };
+            expect(equalUnderlying<Type>(buffer, expected)) << compare(buffer);
+
+            buffer.insert(2, -42, circbuf::BufferInsertPolicy::DiscardHead);
+            expected = std::vector{ 10, 11, -42, 12, 13, 14 };
+            expect(equalUnderlying<Type>(buffer, expected)) << compare(buffer);
+
+            buffer.insert(0, -42, circbuf::BufferInsertPolicy::DiscardHead);
+            expected = std::vector{ -42, 10, 11, -42, 12, 13, 14 };
+            buffer.insert(buffer.size(), -42, circbuf::BufferInsertPolicy::DiscardHead);
+        }
+    };
+
+    "removal should be able to remove value anywhere in the buffer"_test = [] {
+        circbuf::CircularBuffer<Type> buffer{ 10 };    // default policy
+        populateContainer(buffer, rv::iota(0, 15));
+        std::vector expected{ 5, 6, 7, 8, 9, 10, 11, 12, 13, 14 };
+        expect(equalUnderlying<Type>(buffer, expected)) << compare(buffer);
+
+        auto value = buffer.remove(3);
+        expected   = std::vector{ 5, 6, 7, 9, 10, 11, 12, 13, 14 };
+        expect(value.value() == 8_i);
+        expect(equalUnderlying<Type>(buffer, expected)) << compare(buffer);
+
+        auto end = buffer.size() - 1;
+        value    = buffer.remove(end);
+        expected = std::vector{ 5, 6, 7, 9, 10, 11, 12, 13 };
+        expect(value.value() == 14_i);
+        expect(equalUnderlying<Type>(buffer, expected)) << compare(buffer);
+
+        value    = buffer.remove(0);
+        expected = std::vector{ 6, 7, 9, 10, 11, 12, 13 };
+        expect(value.value() == 5_i);
+        expect(equalUnderlying<Type>(buffer, expected)) << compare(buffer);
+    };
+
+    "default initialized CircularBuffer is basically useless"_test = [] {
+        circbuf::CircularBuffer<int> buffer;
+        expect(buffer.size() == 0_i);
+        expect(buffer.capacity() == 0_i);
+        expect(throws([&] { buffer.push_back(42); })) << "should throw when push to empty buffer";
+        expect(throws([&] { buffer.pop_front(); })) << "should throw when pop from empty buffer";
+    };
+
+    "move should leave buffer into an empty state that is not usable"_test = [] {
+        circbuf::CircularBuffer<Type> buffer{ 20 };
+        populateContainer(buffer, rv::iota(0, 10));
+
+        expect(buffer.size() == 10_i);
+        expect(equalUnderlying<Type>(buffer, rv::iota(0, 10)));
+
+        auto buffer2 = std::move(buffer);
+        expect(buffer.size() == 0_i);
+        expect(buffer.capacity() == 0_i);
+        expect(throws([&] { buffer.push_back(42); })) << "should throw when push to empty buffer";
+        expect(throws([&] { buffer.pop_front(); })) << "should throw when pop from empty buffer";
+    };
+
+    if constexpr (std::copyable<Type>) {
+        "copy should copy each element exactly"_test = [] {
+            circbuf::CircularBuffer<Type> buffer{ 20 };
+            populateContainer(buffer, rv::iota(0, 10));
+
+            expect(buffer.size() == 10_i);
+            expect(equalUnderlying<Type>(buffer, rv::iota(0, 10)));
+
+            auto buffer2 = buffer;
+            expect(buffer2.size() == 10_i);
+            expect(rr::equal(buffer2, buffer));
+
+            auto buffer3 = buffer2;
+            expect(buffer3.size() == 10_i);
+            expect(rr::equal(buffer3, buffer));
+        };
     }
 
-    NonTrivialType(const NonTrivialType& other)
-        : m_value{ other.m_value }
-    {
-    }
-
-    NonTrivialType& operator=(const NonTrivialType& other)
-    {
-        m_value = other.m_value;
-        return *this;
-    }
-
-    NonTrivialType(NonTrivialType&& other) noexcept
-        : m_value{ std::exchange(other.m_value, 0) }
-    {
-    }
-
-    NonTrivialType& operator=(NonTrivialType&& other) noexcept
-    {
-        m_value = std::exchange(other.m_value, 0);
-        return *this;
-    }
-
-    auto operator<=>(const NonTrivialType&) const = default;
-
-    // for fmt::format
-    friend auto          format_as(NonTrivialType f) { return f.m_value; }
-    friend std::ostream& operator<<(std::ostream& os, NonTrivialType f)
-    {
-        return os << fmt::format("{}", format_as(f));
-    }
-};
+    // unbalanced constructor/destructor means there is a bug in the code
+    assert(Type::activeInstanceCount() == 0);
+}
 
 int main()
 {
-    "push from empty state but not until full"_test = [] {
-        CircBuffer<int> circ{ 10 };
-        std::vector     expected{ 1, 2, 3, 4, 5, 6, 0, 0, 0, 0 };    // 6 insertion
-        for (int i = 1; i <= 6; ++i) {
-            circ.push(std::move(i));
+    test_util::forEach<test_util::NonTrivialPermutations>([]<typename T>() {
+        if constexpr (circbuf::CircularBufferElement<T>) {
+            test<T>();
         }
-        ut::expect(circ.size() == 6_ull);
-        ut::expect(sr::equal(circ.buf(), expected));
-    };
-
-    "push from empty state until full"_test = [] {
-        CircBuffer<int> circ{ 5 };
-        std::vector     expected{ 1, 2, 3, 4, 5 };    // 5 insertion
-        for (int i = 1; i <= 5; ++i) {
-            circ.push(std::move(i));
-        }
-        ut::expect(circ.size() == 5_ull);
-        ut::expect(sr::equal(circ.buf(), expected));
-    };
-
-    "push from empty state still push even after full"_test = [] {
-        CircBuffer<int> circ{ 5 };
-        std::vector     expected{ 6, 7, 3, 4, 5 };    // 7 insertion; 6, 7 will overwrite 1, 2
-        for (int i = 1; i <= 7; ++i) {
-            circ.push(std::move(i));
-        }
-        ut::expect(circ.size() == 5_ull);    // full
-        ut::expect(sr::equal(circ.buf(), expected));
-    };
-
-    "pop until exhausted but after that the begin pointer is not at the start"_test = [] {
-        CircBuffer<NonTrivialType>  circ{ 5 };
-        std::vector<NonTrivialType> initial{ 6, 7, 3, 4, 5 };    // 7 insertions
-        std::vector<NonTrivialType> afterPushAfterExhausted{ 0, 0, 8, 0, 0 };
-
-        for (int i = 1; i <= 7; ++i) {
-            circ.push(NonTrivialType{ i });
-        }
-        ut::expect(circ.size() == 5_ull);
-        ut::expect(sr::equal(circ.buf(), initial));
-
-        while (circ.pop() != std::nullopt) { }
-
-        ut::expect(circ.size() == 0_ull);
-
-        ut::expect(*circ.push(NonTrivialType{ 8 }) == NonTrivialType{ 8 });
-        ut::expect(circ.size() == 1_ull);
-        ut::expect(sr::equal(circ.buf(), afterPushAfterExhausted));
-    };
-
-    "pop from empty state"_test = [] {
-        CircBuffer<int> circ{ 5 };
-        ut::expect(circ.pop() == std::nullopt);
-    };
-
-    "pop from non-empty state but not full for trivial types"_test = [] {
-        CircBuffer<TrivialType>  circ{ 5 };
-        std::vector<TrivialType> expected{
-            { 1, 1.0f }, { 2, 2.0f }, { 3, 3.0f }, { 4, 4.0f }, { 0, 0.0f }
-        };    // 4 insertion
-
-        for (int i = 1; i <= 4; ++i) {
-            circ.push(TrivialType{ i, static_cast<float>(i) });
-        }
-        ut::expect(circ.size() == 4_ull);
-        ut::expect(sr::equal(circ.buf(), expected));
-
-        ut::expect(*circ.pop() == TrivialType{ 1, 1.0f });
-        ut::expect(circ.size() == 3_ull);
-        ut::expect(sr::equal(circ.buf() | sv::drop(1), expected | sv::drop(1)));
-    };
-
-    "pop from non-empty state but not full for non-trivial types"_test = [] {
-        CircBuffer<NonTrivialType>  circ{ 5 };
-        std::vector<NonTrivialType> expected{ { 1 }, { 2 }, { 3 }, { 4 }, {} };    // 4 insertion
-
-        for (int i = 1; i <= 4; ++i) {
-            circ.push(NonTrivialType{ i });
-        }
-        ut::expect(circ.size() == 4_ull);
-        ut::expect(sr::equal(circ.buf(), expected));
-
-        ut::expect(*circ.pop() == NonTrivialType{ 1 });
-        ut::expect(circ.size() == 3_ull);
-        ut::expect(circ.buf()[0] == NonTrivialType{}) << "pop-ed element should be reset to default";
-        ut::expect(sr::equal(circ.buf() | sv::drop(1), expected | sv::drop(1)));
-    };
-
-    "pop from a full state for trivial types"_test = [] {
-        CircBuffer<TrivialType>  circ{ 5 };
-        std::vector<TrivialType> expected{
-            { 1, 1.0f }, { 2, 2.0f }, { 3, 3.0f }, { 4, 4.0f }, { 5, 5.0f }
-        };    // 5 insertion
-
-        for (int i = 1; i <= 5; ++i) {
-            circ.push(TrivialType{ i, static_cast<float>(i) });
-        }
-        ut::expect(circ.size() == 5_ull);
-        ut::expect(sr::equal(circ.buf(), expected));
-
-        ut::expect(*circ.pop() == TrivialType{ 1, 1.0f });
-        ut::expect(circ.size() == 4_ull);
-        ut::expect(sr::equal(circ.buf() | sv::drop(1), expected | sv::drop(1)));
-    };
-
-    "pop from a full state for non-trivial types"_test = [] {
-        CircBuffer<NonTrivialType>  circ{ 5 };
-        std::vector<NonTrivialType> expected{ { 1 }, { 2 }, { 3 }, { 4 }, { 5 } };    // 5 insertion
-
-        for (int i = 1; i <= 5; ++i) {
-            circ.push(NonTrivialType{ i });
-        }
-        ut::expect(circ.size() == 5_ull);
-        ut::expect(sr::equal(circ.buf(), expected));
-
-        ut::expect(*circ.pop() == NonTrivialType{ 1 });
-        ut::expect(circ.size() == 4_ull);
-        ut::expect(circ.buf()[0] == NonTrivialType{}) << "pop-ed element should be reset to default";
-        ut::expect(sr::equal(circ.buf() | sv::drop(1), expected | sv::drop(1)));
-    };
-
-    // I'll just skip the TrivialType case from this point onwards, since the moved-from state is unspecified
-
-    "pop from a full state that has overwrite and the begin pointer is in the middle"_test = [] {
-        CircBuffer<NonTrivialType> circ{ 5 };
-
-        std::vector<NonTrivialType> beforePop{
-            { 6 }, { 7 }, { 3 }, { 4 }, { 5 },    // 3 is the begin/end pointer/index
-        };    // 7 insertion; 6, 7 will overwrite 1, 2
-        std::vector<NonTrivialType> afterPop{
-            { 6 }, { 7 }, {}, { 4 }, { 5 },    // 3 is moved-from; defaulted
-        };
-        std::vector<NonTrivialType> afterPushAfterPop{
-            { 6 }, { 7 }, { 8 }, { 4 }, { 5 },    // 3 contains new value
-        };
-        std::vector<NonTrivialType> afterPopAfterPopAfterPushAfterPop{
-            { 6 }, { 7 }, { 8 }, {}, {},    // 4 and 5 are moved-from; defaulted
-        };
-        std::vector<NonTrivialType> afterPoppingAll{ {}, {}, {}, {}, {} };                // end at 4
-        std::vector<NonTrivialType> afterPushAfterPoppingAll{ {}, {}, {}, { 9 }, {} };    // end is filled
-
-        for (int i = 1; i <= 7; ++i) {
-            circ.push(NonTrivialType{ i });
-        }
-        ut::expect(circ.size() == 5_ull);
-        ut::expect(sr::equal(circ.buf(), beforePop));
-
-        ut::expect(*circ.pop() == NonTrivialType{ 3 }) << "pop-ed element should have value 3";
-        ut::expect(circ.size() == 4_ull);
-        ut::expect(circ.buf()[2] == NonTrivialType{}) << "pop-ed element should be reset to default";
-
-        ut::expect(*circ.push(NonTrivialType{ 8 }) == NonTrivialType{ 8 })
-            << "push should return the pushed element";
-
-        ut::expect(circ.size() == 5_ull);
-        ut::expect(sr::equal(circ.buf(), afterPushAfterPop));
-
-        ut::expect(*circ.pop() == NonTrivialType{ 4 });
-        ut::expect(*circ.pop() == NonTrivialType{ 5 });
-        ut::expect(circ.size() == 3_ull);
-        ut::expect(sr::equal(circ.buf(), afterPopAfterPopAfterPushAfterPop));
-
-        while (circ.pop() != std::nullopt) { }
-        ut::expect(circ.size() == 0_ull);
-        ut::expect(sr::equal(circ.buf(), afterPoppingAll));
-
-        ut::expect(*circ.push(NonTrivialType{ 9 }) == NonTrivialType{ 9 });
-        ut::expect(circ.size() == 1_ull);
-        ut::expect(sr::equal(circ.buf(), afterPushAfterPoppingAll));
-    };
-
-    "pop from a full state that has overwrite and the begin is at the boundary of the buffer"_test = [] {
-        CircBuffer<NonTrivialType> circ{ 5 };
-
-        std::vector<NonTrivialType> beforePop{
-            { 11 }, { 12 }, { 13 }, { 14 }, { 10 },    // begin/end at 10
-        };    // 14 insertion; 11, 12, 13, 14 overwrite previous val
-        std::vector<NonTrivialType> afterPop{
-            { 11 }, { 12 }, { 13 }, { 14 }, {},    // 10 is moved-from; defaulted
-        };
-        std::vector<NonTrivialType> afterPopAfterPop{
-            {}, { 12 }, { 13 }, { 14 }, {},    // 11 is moved-from; defaulted
-        };
-        std::vector<NonTrivialType> afterPushPushPush{
-            { 16 }, { 17 }, { 13 }, { 14 }, { 15 },    // 3 insertions; 15, 16, 17 overwrite {}, 12
-        };
-
-        for (int i = 1; i <= 14; ++i) {
-            circ.push(NonTrivialType{ i });
-        }
-
-        ut::expect(circ.size() == 5_ull);
-        ut::expect(sr::equal(circ.buf(), beforePop));
-
-        ut::expect(*circ.pop() == NonTrivialType{ 10 });
-        ut::expect(circ.size() == 4_ull);
-        ut::expect(circ.buf()[4] == NonTrivialType{}) << "pop-ed element should be reset to default";
-        ut::expect(sr::equal(circ.buf(), afterPop));
-
-        ut::expect(*circ.pop() == NonTrivialType{ 11 });
-        ut::expect(circ.size() == 3_ull);
-        ut::expect(circ.buf()[0] == NonTrivialType{}) << "pop-ed element should be reset to default";
-        ut::expect(sr::equal(circ.buf(), afterPopAfterPop));
-
-        for (int i = 15; i <= 17; ++i) {
-            circ.push(NonTrivialType{ i });
-        }
-        ut::expect(circ.size() == 5_ull);
-        ut::expect(circ.size() == circ.capacity());
-        ut::expect(sr::equal(circ.buf(), afterPushPushPush));
-    };
-
-    "iter through full buffer should start from the begin pointer and stop at the end pointer"_test = [] {
-        CircBuffer<int> circ{ 5 };
-        std::vector     internalBuf{ 6, 7, 3, 4, 5 };      // values in memory; begin/end at 3
-        std::vector     outwardAppear{ 3, 4, 5, 6, 7 };    // values seen from iterating the buffer
-
-        for (int i = 1; i <= 7; ++i) {
-            circ.push(std::move(i));
-        }
-
-        ut::expect(sr::equal(circ.buf(), internalBuf));
-        ut::expect(sr::equal(circ, outwardAppear));
-    };
-
-    "iter through non-full buffer should start from the begin pointer and stop at the end pointer"_test = [] {
-        CircBuffer<NonTrivialType>  circ{ 5 };
-        std::vector<NonTrivialType> internalBuf{ 6, 7, 0, 0, 5 };    // begin at 5, end at 7
-        std::vector<NonTrivialType> outwardAppear{ 5, 6, 7 };        // values seen from iterating the buffer
-
-        for (int i = 1; i <= 7; ++i) {
-            circ.push(std::move(i));
-        }
-        std::ignore = circ.pop();
-        std::ignore = circ.pop();
-
-        ut::expect(sr::equal(circ.buf(), internalBuf));
-        ut::expect(sr::equal(circ, outwardAppear));
-    };
-
-    "linearize a non-full buffer with the begin pointer at start should return the buffer as is"_test = [] {
-        CircBuffer<int> circ{ 5 };
-        std::vector     buf{ 1, 2, 3, 4, 0 };
-
-        for (int i = 1; i <= 4; ++i) {
-            circ.push(std::move(i));
-        }
-        ut::expect(sr::equal(circ.buf(), buf));
-
-        // copy
-        auto newCirc = circ.linearizeCopy();
-        ut::expect(sr::equal(newCirc.buf(), buf));
-
-        // in-place
-        circ.linearize();
-        ut::expect(sr::equal(circ.buf(), buf));
-
-        ut::expect(sr::equal(circ.buf(), newCirc.buf()));
-    };
-
-    "linearize a non-full buffer with the begin pointer at the middle should move values to start"_test = [] {
-        CircBuffer<NonTrivialType>  circ{ 5 };
-        std::vector<NonTrivialType> buf{ 6, 0, 0, 4, 5 };
-        std::vector<NonTrivialType> bufAfterLinearize{ 4, 5, 6, 0, 0 };
-
-        for (int i = 1; i <= 6; ++i) {
-            circ.push(NonTrivialType{ i });
-        }
-        std::ignore = circ.pop();
-        std::ignore = circ.pop();
-
-        ut::expect(sr::equal(circ.buf(), buf));
-
-        // copy
-        auto newCirc = circ.linearizeCopy();
-        ut::expect(sr::equal(newCirc.buf(), bufAfterLinearize));
-
-        // in-place
-        circ.linearize();
-        ut::expect(sr::equal(circ.buf(), bufAfterLinearize));
-
-        ut::expect(sr::equal(circ.buf(), newCirc.buf()));
-    };
-
-    "linearize a full buffer with the begin pointer at the start should return the buffer as is"_test = [] {
-        CircBuffer<int> circ{ 5 };
-        std::vector     buf{ 1, 2, 3, 4, 5 };
-
-        for (int i = 1; i <= 5; ++i) {
-            circ.push(std::move(i));
-        }
-        ut::expect(sr::equal(circ.buf(), buf));
-
-        // copy
-        auto newCirc = circ.linearizeCopy();
-        ut::expect(sr::equal(newCirc.buf(), buf));
-
-        // in-place
-        circ.linearize();
-        ut::expect(sr::equal(circ.buf(), buf));
-
-        ut::expect(sr::equal(circ.buf(), newCirc.buf()));
-    };
-
-    "linearize a full buffer with the begin pointer at the middle should move values to start"_test = [] {
-        CircBuffer<NonTrivialType>  circ{ 5 };
-        std::vector<NonTrivialType> buf{ 6, 7, 3, 4, 5 };
-        std::vector<NonTrivialType> bufAfterLinearize{ 3, 4, 5, 6, 7 };
-
-        for (int i = 1; i <= 7; ++i) {
-            circ.push(NonTrivialType{ i });
-        }
-
-        ut::expect(sr::equal(circ.buf(), buf));
-
-        // copy
-        auto newCirc = circ.linearizeCopy();
-        ut::expect(sr::equal(newCirc.buf(), bufAfterLinearize));
-
-        // in-place
-        circ.linearize();
-        ut::expect(sr::equal(circ.buf(), bufAfterLinearize));
-
-        ut::expect(sr::equal(circ.buf(), newCirc.buf()));
-    };
-
-    "reset should do nothing to the buffer but reset the begin and end pointer to start"_test = [] {
-        CircBuffer<NonTrivialType>  circ{ 5 };
-        std::vector<NonTrivialType> buf{ { 6 }, {}, {}, { 4 }, { 5 } };    // 6 insertions; 2 pops
-        std::vector<NonTrivialType> bufAfterPushAfterReset{ { 7 }, { 8 }, {}, { 4 }, { 5 } };    // 2 insert
-
-        for (int i = 1; i <= 6; ++i) {
-            circ.push(NonTrivialType{ i });
-        }
-        std::ignore = circ.pop();
-        std::ignore = circ.pop();
-
-        ut::expect(circ.size() == 3_ull);
-        ut::expect(sr::equal(circ.buf(), buf));
-
-        circ.reset();
-        ut::expect(circ.size() == 0_ull);
-        ut::expect(sr::equal(circ.buf(), buf));
-
-        circ.push(NonTrivialType{ 7 });
-        circ.push(NonTrivialType{ 8 });
-
-        ut::expect(circ.size() == 2_ull);
-        ut::expect(sr::equal(circ.buf(), bufAfterPushAfterReset));
-    };
-
-    "clear should reset the elements to its default state"_test = [] {
-        CircBuffer<NonTrivialType>  circ{ 5 };
-        std::vector<NonTrivialType> buf{ { 6 }, {}, {}, { 4 }, { 5 } };     // 6 insertions; 2 pops
-        std::vector<NonTrivialType> bufAfterClear{ {}, {}, {}, {}, {} };    // all elements are reset
-
-        for (int i = 1; i <= 6; ++i) {
-            circ.push(NonTrivialType{ i });
-        }
-        std::ignore = circ.pop();
-        std::ignore = circ.pop();
-
-        ut::expect(circ.size() == 3_ull);
-        ut::expect(sr::equal(circ.buf(), buf));
-
-        circ.clear();
-        ut::expect(circ.size() == 0_ull);
-        ut::expect(sr::equal(circ.buf(), bufAfterClear));
-    };
-
-    "resize non-full buffer to bigger capacity change order in memory when begin not at start"_test = [] {
-        CircBuffer<NonTrivialType>  circ{ 5 };
-        std::vector<NonTrivialType> buf{ 6, 7, 0, 0, 5 };                              // begin at 5, end at 7
-        std::vector<NonTrivialType> bufAfterResize{ 5, 6, 7, 0, 0, 0, 0, 0, 0, 0 };    // 5 -> 10
-        std::vector<NonTrivialType> bufAfterPushAfterResize{ 5, 6, 7, 8, 0, 0, 0, 0, 0, 0 };
-
-        for (int i = 1; i <= 7; ++i) {
-            circ.push(std::move(i));
-        }
-        std::ignore = circ.pop();
-        std::ignore = circ.pop();
-
-        ut::expect(circ.size() == 3_ull);
-        ut::expect(sr::equal(circ.buf(), buf));
-
-        circ.resize(10);
-        ut::expect(circ.size() == 3_ull);
-        ut::expect(sr::equal(circ.buf(), bufAfterResize));
-
-        ut::expect(*circ.push(NonTrivialType{ 8 }) == NonTrivialType{ 8 });
-        ut::expect(circ.size() == 4_ull);
-        ut::expect(sr::equal(circ.buf(), bufAfterPushAfterResize));
-    };
-
-    "resize full buffer to bigger capacity should change order in memory when begin not at start"_test = [] {
-        CircBuffer<NonTrivialType>  circ{ 5 };
-        std::vector<NonTrivialType> buf{ 11, 12, 13, 14, 10 };    // begin at 10, end at 14
-        std::vector<NonTrivialType> bufAfterResize{ 10, 11, 12, 13, 14, 0, 0, 0, 0, 0 };
-        std::vector<NonTrivialType> bufAfterPushAfterResize{ 10, 11, 12, 13, 14, 15, 0, 0, 0, 0 };
-
-        for (int i = 1; i <= 14; ++i) {
-            circ.push(NonTrivialType{ i });
-        }
-
-        ut::expect(circ.size() == 5_ull);
-        ut::expect(sr::equal(circ.buf(), buf));
-
-        circ.resize(10);
-        ut::expect(circ.size() == 5_ull);
-        ut::expect(sr::equal(circ.buf(), bufAfterResize));
-
-        ut::expect(*circ.push(NonTrivialType{ 15 }) == NonTrivialType{ 15 });
-        ut::expect(circ.size() == 6_ull);
-        ut::expect(sr::equal(circ.buf(), bufAfterPushAfterResize));
-    };
-
-    "resize non-full buffer to smaller capacity and number of elements less than new capacity"_test = [] {
-        CircBuffer<NonTrivialType>  circ{ 10 };
-        std::vector<NonTrivialType> buf{ 11, 12, 0, 0, 0, 0, 0, 0, 9, 10 };    // 12 insertions; 6 pops
-        std::vector<NonTrivialType> bufAfterResize{ 9, 10, 11, 12, 0 };        // 10 -> 5
-
-        for (int i = 1; i <= 12; ++i) {
-            circ.push(NonTrivialType{ i });
-        }
-        for (int i = 1; i <= 6; ++i) {
-            std::ignore = circ.pop();
-        }
-
-        ut::expect(circ.size() == 4_ull);
-        ut::expect(sr::equal(circ.buf(), buf));
-
-        using R = decltype(circ)::ResizePolicy;
-
-        auto tmp = circ;
-        tmp.resize(5, R::DISCARD_OLD);
-        ut::expect(tmp.size() == 4_ull);
-        ut::expect(sr::equal(tmp.buf(), bufAfterResize))
-            << fmt::format("{} vs {}", tmp.buf(), bufAfterResize);
-
-        tmp = circ;
-        tmp.resize(5, R::DISCARD_NEW);
-        ut::expect(tmp.size() == 4_ull);
-        ut::expect(sr::equal(tmp.buf(), bufAfterResize))
-            << fmt::format("{} vs {}", tmp.buf(), bufAfterResize);
-    };
-
-    "resize non-full buffer to smaller capacity and number of elements greater than new capacity"_test = [] {
-        CircBuffer<NonTrivialType>  circ{ 10 };
-        std::vector<NonTrivialType> buf{ 11, 12, 13, 14, 15, 0, 0, 0, 9, 10 };      // 15 insertions; 3 pops
-        std::vector<NonTrivialType> bufAfterResizeDropOld{ 11, 12, 13, 14, 15 };    // 10 -> 5
-        std::vector<NonTrivialType> bufAfterResizeDropNew{ 9, 10, 11, 12, 13 };     // 10 -> 5
-
-        for (int i = 1; i <= 15; ++i) {
-            circ.push(NonTrivialType{ i });
-        }
-        for (int i = 1; i <= 3; ++i) {
-            std::ignore = circ.pop();
-        }
-
-        ut::expect(circ.size() == 7_ull);
-        ut::expect(sr::equal(circ.buf(), buf));
-
-        using R = decltype(circ)::ResizePolicy;
-
-        auto tmp = circ;
-        tmp.resize(5, R::DISCARD_OLD);
-        ut::expect(tmp.size() == 5_ull);
-        ut::expect(sr::equal(tmp.buf(), bufAfterResizeDropOld))
-            << fmt::format("{} vs {}", tmp.buf(), bufAfterResizeDropOld);
-
-        tmp = circ;
-        tmp.resize(5, R::DISCARD_NEW);
-        ut::expect(tmp.size() == 5_ull);
-        ut::expect(sr::equal(tmp.buf(), bufAfterResizeDropNew))
-            << fmt::format("{} vs {}", tmp.buf(), bufAfterResizeDropNew);
-    };
-
-    "resize full buffer to a bigger capacity should move each element to start of new buffer"_test = [] {
-        CircBuffer<NonTrivialType>  circ{ 5 };
-        std::vector<NonTrivialType> buf{ 11, 12, 13, 14, 10 };    // begin at 10, end at 14
-        std::vector<NonTrivialType> bufAfterResize{ 10, 11, 12, 13, 14, 0, 0, 0, 0, 0 };
-
-        for (int i = 1; i <= 14; ++i) {
-            circ.push(NonTrivialType{ i });
-        }
-
-        ut::expect(circ.size() == 5_ull);
-        ut::expect(sr::equal(circ.buf(), buf));
-
-        circ.resize(10);
-        ut::expect(circ.size() == 5_ull);
-        ut::expect(sr::equal(circ.buf(), bufAfterResize));
-    };
-
-    "resize full buffer to a smaller capacity should move each element according to policy"_test = [] {
-        CircBuffer<NonTrivialType>  circ{ 12 };
-        std::vector<NonTrivialType> buf{ 13, 14, 15, 16, 17, 6, 7, 8, 9, 10, 11, 12 };    // 15 insertions
-        std::vector<NonTrivialType> bufAfterResizeDropOld{ 13, 14, 15, 16, 17 };          // 10 -> 5
-        std::vector<NonTrivialType> bufAfterResizeDropNew{ 6, 7, 8, 9, 10 };              // 10 -> 5
-
-        for (int i = 1; i <= 17; ++i) {
-            circ.push(NonTrivialType{ i });
-        }
-
-        ut::expect(circ.size() == 12_ull);
-        ut::expect(sr::equal(circ.buf(), buf));
-
-        using R = decltype(circ)::ResizePolicy;
-
-        auto tmp = circ;
-        tmp.resize(5, R::DISCARD_OLD);
-        ut::expect(tmp.size() == 5_ull);
-        ut::expect(sr::equal(tmp.buf(), bufAfterResizeDropOld))
-            << fmt::format("{} vs {}", tmp.buf(), bufAfterResizeDropOld);
-
-        tmp = circ;
-        tmp.resize(5, R::DISCARD_NEW);
-        ut::expect(tmp.size() == 5_ull);
-        ut::expect(sr::equal(tmp.buf(), bufAfterResizeDropNew))
-            << fmt::format("{} vs {}", tmp.buf(), bufAfterResizeDropNew);
-    };
+    });
 }

@@ -11,21 +11,24 @@ find_package(fmt REQUIRED)
 
 add_subdirectory(lib/circbuf) # emits circbuf target
 
-add_executable(circular_buffer_test circular_buffer_test.cpp)
-target_link_libraries(circular_buffer_test PRIVATE Boost::ut fmt::fmt circbuf)
-target_compile_options(circular_buffer_test PRIVATE -Wall -Wextra -Wconversion)
+function(make_test NAME)
+  add_executable(${NAME} ${NAME}.cpp)
+  target_link_libraries(${NAME} PRIVATE fmt::fmt Boost::ut circbuf)
+  target_compile_features(${NAME} PRIVATE cxx_std_23)
+  set_target_properties(${NAME} PROPERTIES CXX_EXTENSIONS OFF)
 
-# sanitizer
-# ~~~
-target_compile_options(circular_buffer_test PRIVATE -fsanitize=address,leak,undefined)
-target_link_options(circular_buffer_test PRIVATE -fsanitize=address,leak,undefined)
+  target_compile_options(${NAME} PRIVATE -Wall -Wextra -Wconversion)
+  target_compile_options(${NAME} PRIVATE -fsanitize=address,leak,undefined)
+  target_link_options(${NAME} PRIVATE -fsanitize=address,leak,undefined)
 
-# run the test
-# ~~~
+  add_test(NAME ${NAME} COMMAND $<TARGET_FILE:${NAME}>)
+
+  add_custom_command(
+    TARGET ${NAME}
+    POST_BUILD
+    COMMAND ${NAME})
+endfunction()
+
 enable_testing()
-add_test(NAME circular_buffer_test COMMAND $<TARGET_FILE:circular_buffer_test>)
-
-add_custom_command(
-  TARGET circular_buffer_test
-  POST_BUILD
-  COMMAND circular_buffer_test)
+make_test(raw_buffer_test)
+make_test(circular_buffer_test)

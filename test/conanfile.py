@@ -1,4 +1,5 @@
 from conan import ConanFile
+from conan.tools.cmake import cmake_layout
 
 
 class Recipe(ConanFile):
@@ -7,4 +8,4 @@ class Recipe(ConanFile):
     requires = ["boost-ext-ut/1.1.9", "fmt/10.2.1"]
 
     def layout(self):
-        self.folders.generators = "conan"
+        cmake_layout(self)
