@@ -64,7 +64,7 @@ int main()
 
 ### Accessing underlying buffer
 
-`circbuf::CircularBuffer` is an array under the hood, so you should be able to see its underlying array using `circbuf::CircularBuffer`. The caveat is that you should only access the underlying buffer if the buffer itself is said to be **_full_** and/or **_linearized_**.
+`circbuf::CircularBuffer` is an array under the hood, so you should be able to see its underlying array. The caveat is that you should only access the underlying buffer if the buffer itself is said to be **_full_** and/or **_linearized_**.
 
 The underlying buffer can be accessed using the member function `data()`, which will return an `std::span`.
 
