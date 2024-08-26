@@ -9,7 +9,22 @@
 #include <format>
 #include <limits>
 #include <optional>
+#include <type_traits>
 #include <utility>
+
+#ifdef CIRCBUF_NO_STL_COMPATIBILITY_METHODS
+#    undef CIRCBUF_NO_STL_COMPATIBILITY_METHODS
+#    define CIRCBUF_NO_STL_COMPATIBILITY_METHODS 1
+#else
+#    define CIRCBUF_NO_STL_COMPATIBILITY_METHODS 0
+#endif
+
+#if CIRCBUF_NO_STL_COMPATIBILITY_METHODS
+#    define push_back  pushBack
+#    define push_front pushFront
+#    define pop_back   popBack
+#    define pop_front  popFront
+#endif
 
 namespace circbuf
 {
@@ -57,8 +72,17 @@ namespace circbuf
         friend class Iterator<false>;
         friend class Iterator<true>;
 
-        using Element    = T;
-        using value_type = Element;    // STL compliance
+        using Element = T;
+
+        // STL compatibility
+        using value_type      = Element;
+        using iterator        = Iterator<false>;
+        using const_iterator  = Iterator<true>;
+        using pointer         = T*;
+        using const_pointer   = const T*;
+        using reference       = T&;
+        using const_reference = const T&;
+        using size_type       = std::size_t;
 
         CircularBuffer() = default;
         ~CircularBuffer() { clear(); };
@@ -88,8 +112,10 @@ namespace circbuf
         T& insert(std::size_t pos, T&& value, BufferInsertPolicy policy = BufferInsertPolicy::DiscardHead);
         T  remove(std::size_t pos);
 
-        // snake-case to be able to use std functions like std::back_inserter
+        // STL compliance [breaking my style, big sad...]
+        T& push_front(const T& value);
         T& push_front(T&& value);
+        T& push_back(const T& value);
         T& push_back(T&& value);
         T  pop_front();
         T  pop_back();
@@ -98,14 +124,14 @@ namespace circbuf
 
         // copied buffer will have the policy set using the parameter if it is not std::nullopt else it will
         // have the same policy as the original buffer
-        [[nodiscard]] CircularBuffer linearizeCopy(std::optional<BufferPolicy> policy) const noexcept
+        [[nodiscard]] CircularBuffer linearizeCopy(std::optional<BufferPolicy> policy = {}) const noexcept
             requires std::copyable<T>;
 
         std::size_t size() const noexcept;
         std::size_t capacity() const noexcept { return m_buffer.size(); }
 
-        auto*       data() noexcept { return m_buffer.data(); }
-        const auto* data() const noexcept { return m_buffer.data(); }
+        std::span<T>       data();
+        std::span<const T> data() const;
 
         auto&       at(std::size_t pos);
         const auto& at(std::size_t pos) const;
@@ -115,6 +141,10 @@ namespace circbuf
 
         auto&       back();
         const auto& back() const;
+
+        bool empty() const { return size() == 0; }
+        bool full() const { return size() == capacity(); }
+        bool linearized() const { return m_head == 0; };
 
         auto begin() noexcept { return Iterator<false>(this, 0); }
         auto begin() const noexcept { return Iterator<true>(this, 0); }
@@ -397,6 +427,14 @@ namespace circbuf
         return value;
     }
 
+    // snake-case to be able to use std functions like std::back_inserter
+    template <CircularBufferElement T>
+    T& CircularBuffer<T>::push_front(const T& value)
+    {
+        return push_front(T{ value });    // copy made here
+    }
+
+    // snake-case to be able to use std functions like std::back_inserter
     template <CircularBufferElement T>
     T& CircularBuffer<T>::push_front(T&& value)
     {
@@ -431,6 +469,13 @@ namespace circbuf
 
         return m_buffer.at(current);
     }
+
+    // snake-case to be able to use std functions like std::back_inserter
+    template <CircularBufferElement T>
+    T& CircularBuffer<T>::push_back(const T& value)
+    {
+        return push_back(T{ value });    // copy made here
+    };
 
     // snake-case to be able to use std functions like std::back_inserter
     template <CircularBufferElement T>
@@ -518,7 +563,7 @@ namespace circbuf
     template <CircularBufferElement T>
     CircularBuffer<T>& CircularBuffer<T>::linearize() noexcept
     {
-        if (m_head == 0 && m_tail == npos) {
+        if (linearized()) {
             return *this;
         }
 
@@ -534,22 +579,38 @@ namespace circbuf
     CircularBuffer<T> CircularBuffer<T>::linearizeCopy(std::optional<BufferPolicy> policy) const noexcept
         requires std::copyable<T>
     {
-        CircularBuffer result{ capacity(), policy.value_or(m_policy) };
+        auto copy = CircularBuffer{ *this };
+        copy.setPolicy(policy->m_capacity, policy->m_store);
 
-        std::rotate_copy(
-            m_buffer.data(), m_buffer.data() + m_head, m_buffer.data() + capacity(), result.m_buffer.data()
-        );
-
-        result.m_tail = m_tail != npos ? (m_tail + capacity() - m_head) % capacity() : npos;
-        result.m_head = 0;
-
-        return result;
+        return copy;
     }
 
     template <CircularBufferElement T>
     std::size_t CircularBuffer<T>::size() const noexcept
     {
         return m_tail == npos ? capacity() : (m_tail + capacity() - m_head) % capacity();
+    }
+
+    template <CircularBufferElement T>
+    std::span<T> CircularBuffer<T>::data()
+    {
+        if (not linearized() and not full()) {
+            throw std::logic_error{
+                "The underlying buffer is not linearized, reading will trigger undefined behavior"
+            };
+        }
+        return { m_buffer.data(), size() };
+    }
+
+    template <CircularBufferElement T>
+    std::span<const T> CircularBuffer<T>::data() const
+    {
+        if (not linearized() and not full()) {
+            throw std::logic_error{
+                "The underlying buffer is not linearized, reading will trigger undefined behavior"
+            };
+        }
+        return { m_buffer.data(), size() };
     }
 
     template <CircularBufferElement T>
@@ -616,8 +677,10 @@ namespace circbuf
     {
     public:
         // STL compatibility
+        using iterator          = Iterator<false>;
+        using const_iterator    = Iterator<true>;
         using iterator_category = std::random_access_iterator_tag;
-        using value_type        = typename CircularBuffer::Element;
+        using value_type        = T;
         using difference_type   = std::ptrdiff_t;
         using pointer           = std::conditional_t<IsConst, const value_type*, value_type*>;
         using reference         = std::conditional_t<IsConst, const value_type&, value_type&>;
@@ -725,5 +788,12 @@ namespace circbuf
         std::size_t m_size   = 0;
     };
 }
+
+#if CIRCBUF_NO_STL_COMPATIBILITY_METHODS
+#    undef push_back pushBack
+#    undef push_front pushFront
+#    undef pop_back popBack
+#    undef pop_front popFront
+#endif
 
 #endif /* end of include guard: CIRCBUF_CIRCULAR_BUFFER_HPP */
