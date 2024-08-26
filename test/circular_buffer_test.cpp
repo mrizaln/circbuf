@@ -21,12 +21,6 @@ using test_util::populateContainer;
 using test_util::populateContainerFront;
 using test_util::subrange;
 
-template <typename T>
-std::string compare(const circbuf::CircularBuffer<T>& buffer)
-{
-    return fmt::format("{} vs u {}", buffer, std::span{ buffer.data(), buffer.capacity() });
-}
-
 constexpr auto g_policyPermutations = std::tuple{
     circbuf::BufferPolicy{
         circbuf::BufferCapacityPolicy::FixedCapacity,
@@ -81,7 +75,7 @@ void test()
         for (auto i : rv::iota(0, 9)) {
             auto& value = buffer.push_back(i);
             expect(that % value.value() == i);
-            expect(that % buffer.back().value() == i) << compare(buffer);
+            expect(that % buffer.back().value() == i);
             expect(that % buffer.front().value() == 42);
         }
 
@@ -122,13 +116,12 @@ void test()
 
         // the circular-buffer iterator
         expect(equalUnderlying<Type>(subrange(buffer, 0, 6), rv::iota(0, 10) | rv::drop(4)));
-        expect(equalUnderlying<Type>(subrange(buffer, 6, 10), rv::iota(21, 25))) << compare(buffer);
+        expect(equalUnderlying<Type>(subrange(buffer, 6, 10), rv::iota(21, 25)));
 
         // the underlying array
-        auto underlying = std::span{ buffer.data(), buffer.capacity() };
-        expect(equalUnderlying<Type>(subrange(underlying, 0, 4), rv::iota(21, 25))) << compare(buffer);
-        expect(equalUnderlying<Type>(subrange(underlying, 4, 10), rv::iota(0, 10) | rv::drop(4)))
-            << compare(buffer);
+        auto underlying = buffer.data();
+        expect(equalUnderlying<Type>(subrange(underlying, 0, 4), rv::iota(21, 25)));
+        expect(equalUnderlying<Type>(subrange(underlying, 4, 10), rv::iota(0, 10) | rv::drop(4)));
     };
 
     "push_back with ThrowOnFull policy should throw when buffer is full"_test = [] {
@@ -183,12 +176,12 @@ void test()
         for (auto i : rv::iota(0, 9)) {
             auto& value = buffer.push_front(i);
             expect(that % value.value() == i);
-            expect(that % buffer.front().value() == i) << compare(buffer);
+            expect(that % buffer.front().value() == i);
             expect(that % buffer.back().value() == 42);
         }
 
         std::array expected{ 42, 0, 1, 2, 3, 4, 5, 6, 7, 8 };
-        expect(equalUnderlying<Type>(buffer | rv::reverse, expected)) << compare(buffer);
+        expect(equalUnderlying<Type>(buffer | rv::reverse, expected));
 
         buffer.clear();
         expect(buffer.size() == 0_i);
@@ -211,7 +204,7 @@ void test()
         populateContainerFront(buffer, rv::iota(0, 10));
         expect(buffer.size() == 10_i);
         expect(that % buffer.size() == buffer.capacity());
-        expect(equalUnderlying<Type>(buffer | rv::reverse, rv::iota(0, 10))) << compare(buffer);
+        expect(equalUnderlying<Type>(buffer | rv::reverse, rv::iota(0, 10)));
 
         // replace old elements (4 times)
         for (auto i : rv::iota(21, 25)) {
@@ -225,13 +218,12 @@ void test()
         // the circular-buffer iterator
         auto rbuffer = buffer | rv::reverse;
         expect(equalUnderlying<Type>(subrange(rbuffer, 0, 6), rv::iota(0, 10) | rv::drop(4)));
-        expect(equalUnderlying<Type>(subrange(rbuffer, 6, 10), rv::iota(21, 25))) << compare(buffer);
+        expect(equalUnderlying<Type>(subrange(rbuffer, 6, 10), rv::iota(21, 25)));
 
         // the underlying array
-        auto runderlying = std::span{ buffer.data(), buffer.capacity() } | rv::reverse;
-        expect(equalUnderlying<Type>(subrange(runderlying, 0, 4), rv::iota(21, 25))) << compare(buffer);
-        expect(equalUnderlying<Type>(subrange(runderlying, 4, 10), rv::iota(0, 10) | rv::drop(4)))
-            << compare(buffer);
+        auto runderlying = buffer.data() | rv::reverse;
+        expect(equalUnderlying<Type>(subrange(runderlying, 0, 4), rv::iota(21, 25)));
+        expect(equalUnderlying<Type>(subrange(runderlying, 4, 10), rv::iota(0, 10) | rv::drop(4)));
     };
 
     "push_front with ThrowOnFull policy should throw when buffer is full"_test = [] {
@@ -245,7 +237,7 @@ void test()
         populateContainerFront(buffer, rv::iota(0, 10));
         expect(buffer.size() == 10_i);
         expect(that % buffer.size() == buffer.capacity());
-        expect(equalUnderlying<Type>(buffer | rv::reverse, rv::iota(0, 10))) << compare(buffer);
+        expect(equalUnderlying<Type>(buffer | rv::reverse, rv::iota(0, 10)));
 
         expect(throws([&] { buffer.push_front(42); })) << "should throw when push to full buffer";
     };
@@ -262,7 +254,7 @@ void test()
             populateContainerFront(buffer, rv::iota(0, 10));
             expect(buffer.size() == 10_i);
             expect(that % buffer.size() == buffer.capacity());
-            expect(equalUnderlying<Type>(buffer | rv::reverse, rv::iota(0, 10))) << compare(buffer);
+            expect(equalUnderlying<Type>(buffer | rv::reverse, rv::iota(0, 10)));
 
             expect(nothrow([&] { buffer.push_front(42); })) << "should not throw when push to full buffer";
             expect(buffer.front().value() == 42_i);
@@ -304,20 +296,20 @@ void test()
 
             buffer.insert(3, 42, circbuf::BufferInsertPolicy::DiscardHead);
             expect(buffer.size() == 10_i);
-            expect(equalUnderlying<Type>(subrange(buffer, 0, 3), rv::iota(1, 4))) << compare(buffer);
-            expect(buffer.at(3).value() == 42_i) << compare(buffer);
-            expect(equalUnderlying<Type>(subrange(buffer, 4, 10), rv::iota(4, 10))) << compare(buffer);
+            expect(equalUnderlying<Type>(subrange(buffer, 0, 3), rv::iota(1, 4)));
+            expect(buffer.at(3).value() == 42_i);
+            expect(equalUnderlying<Type>(subrange(buffer, 4, 10), rv::iota(4, 10)));
 
             auto expected = std::vector{ 1, 2, 3, 42, 4, 5, 6, 7, 8, 9 };
-            expect(equalUnderlying<Type>(buffer, expected)) << compare(buffer);
+            expect(equalUnderlying<Type>(buffer, expected));
 
             buffer.insert(0, 42, circbuf::BufferInsertPolicy::DiscardHead);
             expected = std::vector{ 42, 2, 3, 42, 4, 5, 6, 7, 8, 9 };
-            expect(equalUnderlying<Type>(buffer, expected)) << compare(buffer);
+            expect(equalUnderlying<Type>(buffer, expected));
 
             buffer.insert(9, 32748, circbuf::BufferInsertPolicy::DiscardHead);
             expected = std::vector{ 2, 3, 42, 4, 5, 6, 7, 8, 9, 32748 };
-            expect(equalUnderlying<Type>(buffer, expected)) << compare(buffer);
+            expect(equalUnderlying<Type>(buffer, expected));
         }
 
         // partially filled buffer condition
@@ -329,11 +321,11 @@ void test()
             }
 
             auto expected = std::vector{ 10, 11, 12, 13, 14 };
-            expect(equalUnderlying<Type>(buffer, expected)) << compare(buffer);
+            expect(equalUnderlying<Type>(buffer, expected));
 
             buffer.insert(2, -42, circbuf::BufferInsertPolicy::DiscardHead);
             expected = std::vector{ 10, 11, -42, 12, 13, 14 };
-            expect(equalUnderlying<Type>(buffer, expected)) << compare(buffer);
+            expect(equalUnderlying<Type>(buffer, expected));
 
             buffer.insert(0, -42, circbuf::BufferInsertPolicy::DiscardHead);
             expected = std::vector{ -42, 10, 11, -42, 12, 13, 14 };
@@ -345,23 +337,23 @@ void test()
         circbuf::CircularBuffer<Type> buffer{ 10 };    // default policy
         populateContainer(buffer, rv::iota(0, 15));
         std::vector expected{ 5, 6, 7, 8, 9, 10, 11, 12, 13, 14 };
-        expect(equalUnderlying<Type>(buffer, expected)) << compare(buffer);
+        expect(equalUnderlying<Type>(buffer, expected));
 
         auto value = buffer.remove(3);
         expected   = std::vector{ 5, 6, 7, 9, 10, 11, 12, 13, 14 };
         expect(value.value() == 8_i);
-        expect(equalUnderlying<Type>(buffer, expected)) << compare(buffer);
+        expect(equalUnderlying<Type>(buffer, expected));
 
         auto end = buffer.size() - 1;
         value    = buffer.remove(end);
         expected = std::vector{ 5, 6, 7, 9, 10, 11, 12, 13 };
         expect(value.value() == 14_i);
-        expect(equalUnderlying<Type>(buffer, expected)) << compare(buffer);
+        expect(equalUnderlying<Type>(buffer, expected));
 
         value    = buffer.remove(0);
         expected = std::vector{ 6, 7, 9, 10, 11, 12, 13 };
         expect(value.value() == 5_i);
-        expect(equalUnderlying<Type>(buffer, expected)) << compare(buffer);
+        expect(equalUnderlying<Type>(buffer, expected));
     };
 
     "default initialized CircularBuffer is basically useless"_test = [] {

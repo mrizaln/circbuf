@@ -66,7 +66,11 @@ namespace test_util
         static constexpr bool s_copyable = CopyConstructible and CopyAssignable;
         static constexpr bool s_default  = DefaultConstructible;
 
-        ~NonTrivial() { --s_activeInstanceCount; }
+        ~NonTrivial()
+        {
+            --s_activeInstanceCount;
+            m_value = npos + 1;
+        }
 
         NonTrivial()
             requires DefaultConstructible
