@@ -27,40 +27,91 @@ target_link_libraries(main PRIVATE circbuf)
 #include <circbuf/circular_buffer.hpp>
 
 #include <iostream>
-#include <string>
 #include <ranges>
+#include <string>
 
 using circbuf::CircularBuffer;
 
-void print(std::string_view prelude, std::ranges::range auto&& range)
-{
-    std::cout << prelude << "[";
-    for (bool first = true; const auto& e : range) {
-        if (!first) std::cout << ", ";
-        std::cout << (e.empty() ? "<-->" : e);
-        first = false;
-    }
-    std::cout << "]\n";
-}
-
 int main()
 {
-    CircularBuffer<std::string> queues{ 12 };       // you specify the capacity of the buffer at construction (can be resized later)
+    // you specify the capacity of the buffer at construction (can be resized later)
+    auto queue = CircularBuffer<std::string>{ 12 };
 
-    for (auto i : std::views::iota(0, 217)) {
-        queues.push(std::to_string(i));
-    }
-    std::optional value = queues.pop();             // pop() returns an optional; pop()-ed value will be in a moved-from state
-    if (value.has_value()) {                        // the optional will be null when there's nothing to pop from buffer
-        std::cout << "pop: " << *value << '\n';
+    // pushing from the back
+    for (auto i : std::views::iota(0, 256)) {
+        queue.push_back(std::format("{0:0b}|{0}", i));
     }
 
-    // pop again...
-    std::ignore = queues.pop();                     // there will be a warning when pop()-ed value is not assigned to a variable
+    // pushing from the front
+    queue.push_front("hello");
+    queue.push_front("world");
 
-    print("iter      : ", queues);                  // can be iterated (forward only) that iterates from the oldest element to the newest
-    print("underlying: ", queues.buf());            // you can see the underlying buffer if you want
+    // you can iterate the CircularBuffer from head to tail
+    for (const auto& value : queue | std::views::reverse) {    // i reverse the iterator here
+        std::cout << value << '\n';
+    }
 
-    // etc... (see the header for all of the available functionalities)
+    // CircularBuffer implements a random access iterator, so you should be able to access it like an array
+    auto mid = queue.remove(6);
+    std::cout << ">>> mid: " << mid << '\n';
+
+    std::cout << "------------\n";
+    for (const auto& value : queue) {
+        std::cout << value << '\n';
+    }
 }
 ```
+
+### Accessing underlying buffer
+
+`circbuf::CircularBuffer` is an array under the hood, so you should be able to see its underlying array using `circbuf::CircularBuffer`. The caveat is that you should only access the underlying buffer if the buffer itself is said to be **_full_** and/or **_linearized_**.
+
+The underlying buffer can be accessed using the member function `data()`, which will return an `std::span`.
+
+> - If you managed to access the non-linearized underlying data or read past the last element of the buffer while the buffer itself is not full, you will read an **uninitialized** memory.
+> - In my testing, there will be no assertion error or core dump.
+> - That's why I provided a check in the `data()` function to avoid this scenario.
+> - The behavior when the check failed is an exception of type `std::logic_error`.
+
+- Full: the number of elements inside the buffer is equal to its capacity
+
+  ```cpp
+  int main() {
+      auto queue = CircularBuffer<int>{ 12 };
+
+      for (auto i : std::views::iota(0, 2373)) {
+          queue.push_back(i);
+      }
+      assert(queue.full());
+
+      // if you want the data to be whatever in order in the underlying buffer, then just skip linearize
+      auto raw = queue.data();
+
+      // you need to linearize your buffer if you want to access it from head to tail
+      auto buf = queue.linearize().data();
+  }
+  ```
+
+- Linearized: when the head of the buffer is at the start of the buffer, it is said that the buffer is linearized
+
+  ```cpp
+  int main() {
+      auto queue = CircularBuffer<int>{ 12 };
+
+      for (auto i : std::ranges::iota(0, 10)) {
+          queue.push_back(i);
+      }
+      assert(not queue.empty());
+
+      auto span = queue.linearize().data();
+      assert(queue.linearized());
+
+      // linearize() function is in-place, use linearizeCopy() to make a copy instead
+      auto copy = queue.linearizeCopy();
+      assert(copy.linearized());
+
+      // copying in general will also linearize the resulting buffer
+      auto copy2 = queue;
+      assert(copy2.linearized());
+  }
+  ```
