@@ -23,18 +23,18 @@ void test()
 
     "nrvo should happen"_test = [] {
         circbuf::detail::RawBuffer<Type> buffer{ 10 };
-        for (auto i : rv::iota(0uz, 10uz)) {
+        for (auto i : rv::iota(0u, 10u)) {
             buffer.construct(i, 10 - i + 1);
         }
 
-        for (auto i : rv::iota(0uz, 10uz)) {
+        for (auto i : rv::iota(0u, 10u)) {
             auto&& value = buffer.at(i);
             expect(that % value.value() == 10 - i + 1);
             fmt::println("stat: {}", value.stat());
         }
 
         if constexpr (Type::s_movable or Type::s_copyable) {
-            for (auto i : rv::iota(0uz, 10uz)) {
+            for (auto i : rv::iota(0u, 10u)) {
                 auto value = std::move(buffer.at(i));
                 expect(that % value.value() == 10 - i + 1);
                 expect(that % value.stat().nocopy() or not Type::s_movable) << fmt::format(
@@ -43,7 +43,7 @@ void test()
                 buffer.destroy(i);
             }
         } else {
-            for (auto i : rv::iota(0uz, 10uz)) {
+            for (auto i : rv::iota(0u, 10u)) {
                 buffer.destroy(i);
             }
         }

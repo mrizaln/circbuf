@@ -14,7 +14,7 @@ add_subdirectory(lib/circbuf) # emits circbuf target
 function(make_test NAME)
   add_executable(${NAME} ${NAME}.cpp)
   target_link_libraries(${NAME} PRIVATE fmt::fmt Boost::ut circbuf)
-  target_compile_features(${NAME} PRIVATE cxx_std_23)
+  target_compile_features(${NAME} PRIVATE cxx_std_20)
   set_target_properties(${NAME} PROPERTIES CXX_EXTENSIONS OFF)
 
   target_compile_options(${NAME} PRIVATE -Wall -Wextra -Wconversion)

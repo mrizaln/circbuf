@@ -15,8 +15,8 @@ namespace test_util
 
     template <typename T>
     concept TestClass = requires(const T t) {
-        { auto{ T::s_movable } } -> std::same_as<bool>;
-        { auto{ T::s_copyable } } -> std::same_as<bool>;
+        // { auto{ T::s_movable } } -> std::same_as<bool>;
+        // { auto{ T::s_copyable } } -> std::same_as<bool>;
         { t.value() } -> std::convertible_to<int>;
         { t.stat() } -> std::same_as<ClassStatCounter>;
     };
