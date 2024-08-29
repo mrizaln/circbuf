@@ -9,6 +9,7 @@
 #include <format>
 #include <limits>
 #include <optional>
+#include <span>
 #include <type_traits>
 #include <utility>
 
@@ -579,8 +580,9 @@ namespace circbuf
     CircularBuffer<T> CircularBuffer<T>::linearizeCopy(std::optional<BufferPolicy> policy) const noexcept
         requires std::copyable<T>
     {
-        auto copy = CircularBuffer{ *this };
-        copy.setPolicy(policy->m_capacity, policy->m_store);
+        auto copy      = CircularBuffer{ *this };
+        auto newPolicy = policy.value_or(m_policy);
+        copy.setPolicy(newPolicy.m_capacity, newPolicy.m_store);
 
         return copy;
     }
