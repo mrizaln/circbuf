@@ -65,11 +65,11 @@ void underlying()
         assert(copy.linearized());
 
         // or linearize_copy() to make a copy instead, you can change the policy here
-        auto copy2 = queue.linearize_copy({
-            .m_capacity = circbuf::BufferCapacityPolicy::DynamicCapacity,
-            .m_store    = circbuf::BufferStorePolicy::ThrowOnFull,    // doesn't matter
-        });
+        auto copy2 = queue.linearize_copy(circbuf::BufferPolicy::ThrowOnFull);
         assert(copy2.linearized());
+
+        assert(copy.policy() == queue.policy());
+        assert(copy.policy() != copy2.policy());
     }
 
     {
