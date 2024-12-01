@@ -1,12 +1,12 @@
 #ifndef CIRCBUF_CIRCULAR_BUFFER_HPP
 #define CIRCBUF_CIRCULAR_BUFFER_HPP
 
-#include "detail/raw_buffer.hpp"
+#include "circbuf/detail/raw_buffer.hpp"
+#include "circbuf/error.hpp"
 
 #include <algorithm>
 #include <concepts>
 #include <cstddef>
-#include <format>
 #include <limits>
 #include <span>
 #include <type_traits>
@@ -16,18 +16,6 @@ namespace circbuf
 {
     template <typename T>
     concept CircularBufferElement = std::movable<T> or std::copyable<T>;
-
-    enum class BufferCapacityPolicy
-    {
-        FixedCapacity,
-        DynamicCapacity,    // will double the capacity when full and halve when less than 1/4 full
-    };
-
-    enum class BufferStorePolicy
-    {
-        ReplaceOnFull,    // push_front/push_back will replace the element adjacent to m_head/m_tail
-        ThrowOnFull,      // throw an exception if push_front/push_back performed on a full buffer
-    };
 
     enum class BufferResizePolicy
     {
@@ -42,10 +30,10 @@ namespace circbuf
         DiscardTail,    // discard the tail element when the buffer is full
     };
 
-    struct BufferPolicy
+    enum class BufferPolicy
     {
-        BufferCapacityPolicy m_capacity = BufferCapacityPolicy::FixedCapacity;
-        BufferStorePolicy    m_store    = BufferStorePolicy::ReplaceOnFull;
+        ReplaceOnFull,    // fixed capacity, push_back replace head, push_front replace tail
+        ThrowOnFull,      // fixed capacity, throw on full
     };
 
     template <CircularBufferElement T>
@@ -73,7 +61,7 @@ namespace circbuf
         CircularBuffer() = default;
         ~CircularBuffer() { clear(); };
 
-        CircularBuffer(std::size_t capacity, BufferPolicy policy = {});
+        CircularBuffer(std::size_t capacity, BufferPolicy policy = BufferPolicy::ReplaceOnFull);
 
         CircularBuffer(CircularBuffer&& other) noexcept;
         CircularBuffer& operator=(CircularBuffer&& other) noexcept;
@@ -93,7 +81,6 @@ namespace circbuf
         T& insert(std::size_t pos, T&& value, BufferInsertPolicy policy = BufferInsertPolicy::DiscardHead);
         T  remove(std::size_t pos);
 
-        // STL compliance [breaking my style, big sad...]
         T& push_front(const T& value);
         T& push_front(T&& value);
         T& push_back(const T& value);
@@ -116,8 +103,8 @@ namespace circbuf
         auto&       at(std::size_t pos);
         const auto& at(std::size_t pos) const;
 
-        auto&       front() { return at(0); };
-        const auto& front() const { return at(0); };
+        auto&       front();
+        const auto& front() const;
 
         auto&       back();
         const auto& back() const;
@@ -262,7 +249,7 @@ namespace circbuf
             return;
         }
 
-        if (size() == 0) {
+        if (empty()) {
             m_buffer = detail::RawBuffer<T>{ new_capacity };
             m_head   = 0;
             m_tail   = 0;
@@ -318,19 +305,11 @@ namespace circbuf
     T& CircularBuffer<T>::insert(std::size_t pos, T&& value, BufferInsertPolicy policy)
     {
         if (capacity() == 0) {
-            if (m_policy.m_capacity == BufferCapacityPolicy::DynamicCapacity) {
-                resize(1, BufferResizePolicy::DiscardOld);
-            } else {
-                throw std::logic_error{ "Can't push to a buffer with zero capacity" };
-            }
+            throw error::ZeroCapacity{ "Can't push to a buffer with zero capacity" };
         }
 
-        if (m_tail == npos) {
-            if (m_policy.m_capacity == BufferCapacityPolicy::DynamicCapacity) {
-                resize(capacity() * 2, BufferResizePolicy::DiscardOld);
-            } else if (m_policy.m_store == BufferStorePolicy::ThrowOnFull) {
-                throw std::out_of_range{ "Buffer is full" };
-            }
+        if (m_tail == npos and m_policy == BufferPolicy::ThrowOnFull) {
+            throw error::BufferFull{ capacity() };
         }
 
         if (m_tail == npos) {
@@ -372,10 +351,12 @@ namespace circbuf
     template <CircularBufferElement T>
     T CircularBuffer<T>::remove(std::size_t pos)
     {
+        if (empty()) {
+            throw error::BufferEmpty{ capacity() };
+        }
+
         if (pos >= size()) {
-            throw std::out_of_range{ std::format(
-                "Cannot remove at position greater than or equal to size; pos: {}, size: {}", pos, size()
-            ) };
+            throw error::OutOfRange{ "Cannot remove at index greater than or equal to size", pos, size() };
         }
 
         const auto count   = size() - pos - 1;
@@ -395,38 +376,24 @@ namespace circbuf
         }
         decrement(m_tail);
 
-        if (m_policy.m_capacity == BufferCapacityPolicy::DynamicCapacity and size() == capacity() / 4) {
-            resize(capacity() / 2, BufferResizePolicy::DiscardOld);
-        }
-
         return value;
     }
 
-    // snake-case to be able to use std functions like std::back_inserter
     template <CircularBufferElement T>
     T& CircularBuffer<T>::push_front(const T& value)
     {
         return push_front(T{ value });    // copy made here
     }
 
-    // snake-case to be able to use std functions like std::back_inserter
     template <CircularBufferElement T>
     T& CircularBuffer<T>::push_front(T&& value)
     {
         if (capacity() == 0) {
-            if (m_policy.m_capacity == BufferCapacityPolicy::DynamicCapacity) {
-                resize(1, BufferResizePolicy::DiscardOld);
-            } else {
-                throw std::logic_error{ "Can't push to a buffer with zero capacity" };
-            }
+            throw error::ZeroCapacity{ "Can't push to a buffer with zero capacity" };
         }
 
-        if (m_tail == npos) {
-            if (m_policy.m_capacity == BufferCapacityPolicy::DynamicCapacity) {
-                resize(capacity() * 2, BufferResizePolicy::DiscardOld);
-            } else if (m_policy.m_store == BufferStorePolicy::ThrowOnFull) {
-                throw std::out_of_range{ "Buffer is full" };
-            }
+        if (m_tail == npos and m_policy == BufferPolicy::ThrowOnFull) {
+            throw error::BufferFull{ capacity() };
         }
 
         auto current = m_head == 0 ? capacity() - 1 : m_head - 1;
@@ -445,31 +412,21 @@ namespace circbuf
         return m_buffer.at(current);
     }
 
-    // snake-case to be able to use std functions like std::back_inserter
     template <CircularBufferElement T>
     T& CircularBuffer<T>::push_back(const T& value)
     {
         return push_back(T{ value });    // copy made here
     };
 
-    // snake-case to be able to use std functions like std::back_inserter
     template <CircularBufferElement T>
     T& CircularBuffer<T>::push_back(T&& value)
     {
         if (capacity() == 0) {
-            if (m_policy.m_capacity == BufferCapacityPolicy::DynamicCapacity) {
-                resize(1, BufferResizePolicy::DiscardOld);
-            } else {
-                throw std::logic_error{ "Can't push to a buffer with zero capacity" };
-            }
+            throw error::ZeroCapacity{ "Can't push to a buffer with zero capacity" };
         }
 
-        if (m_tail == npos) {
-            if (m_policy.m_capacity == BufferCapacityPolicy::DynamicCapacity) {
-                resize(capacity() * 2, BufferResizePolicy::DiscardOld);
-            } else if (m_policy.m_store == BufferStorePolicy::ThrowOnFull) {
-                throw std::out_of_range{ "Buffer is full" };
-            }
+        if (m_tail == npos and m_policy == BufferPolicy::ThrowOnFull) {
+            throw error::BufferFull{ capacity() };
         }
 
         auto current = m_head;
@@ -493,8 +450,8 @@ namespace circbuf
     template <CircularBufferElement T>
     T CircularBuffer<T>::pop_front()
     {
-        if (size() == 0) {
-            throw std::out_of_range{ "Buffer is empty" };
+        if (empty()) {
+            throw error::BufferEmpty{ capacity() };
         }
 
         auto value = std::move(m_buffer.at(m_head));
@@ -505,18 +462,14 @@ namespace circbuf
         }
         increment(m_head);
 
-        if (m_policy.m_capacity == BufferCapacityPolicy::DynamicCapacity and size() == capacity() / 4) {
-            resize(capacity() / 2, BufferResizePolicy::DiscardOld);
-        }
-
         return value;
     }
 
     template <CircularBufferElement T>
     T CircularBuffer<T>::pop_back()
     {
-        if (size() == 0) {
-            throw std::out_of_range{ "Buffer is empty" };
+        if (empty()) {
+            throw error::BufferEmpty{ capacity() };
         }
 
         auto index = m_tail == npos ? (m_head == 0 ? capacity() - 1 : m_head - 1)
@@ -526,10 +479,6 @@ namespace circbuf
         m_buffer.destroy(index);
 
         m_tail = index;
-
-        if (m_policy.m_capacity == BufferCapacityPolicy::DynamicCapacity and size() == capacity() / 4) {
-            resize(capacity() / 2, BufferResizePolicy::DiscardOld);
-        }
 
         return value;
     }
@@ -605,10 +554,7 @@ namespace circbuf
     std::span<T> CircularBuffer<T>::data()
     {
         if (not linearized() and not full()) {
-            throw std::logic_error{
-                "The underlying buffer is not linearized and not full, reading will trigger undefined "
-                "behavior",
-            };
+            throw error::NotLinearizedNotFull{ "Reading the data will lead to undefined behavior" };
         }
         return { m_buffer.data(), size() };
     }
@@ -617,10 +563,7 @@ namespace circbuf
     std::span<const T> CircularBuffer<T>::data() const
     {
         if (not linearized() and not full()) {
-            throw std::logic_error{
-                "The underlying buffer is not linearized and not full, reading will trigger undefined "
-                "behavior",
-            };
+            throw error::NotLinearizedNotFull{ "Reading the data will lead to undefined behavior" };
         }
         return { m_buffer.data(), size() };
     }
@@ -629,7 +572,7 @@ namespace circbuf
     auto& CircularBuffer<T>::at(std::size_t pos)
     {
         if (pos >= size()) {
-            throw std::out_of_range{ std::format("Index is out of range: index {} on size {}", pos, size()) };
+            throw error::OutOfRange{ "Can't access element outside of the range", pos, size() };
         }
 
         auto realpos = (m_head + pos) % capacity();
@@ -640,7 +583,7 @@ namespace circbuf
     const auto& CircularBuffer<T>::at(std::size_t pos) const
     {
         if (pos >= size()) {
-            throw std::out_of_range{ std::format("Index is out of range: index {} on size {}", pos, size()) };
+            throw error::OutOfRange{ "Can't access element outside of the range", pos, size() };
         }
 
         auto realpos = (m_head + pos) % capacity();
@@ -648,10 +591,28 @@ namespace circbuf
     }
 
     template <CircularBufferElement T>
+    auto& CircularBuffer<T>::front()
+    {
+        if (empty()) {
+            throw error::BufferEmpty{ capacity() };
+        }
+        return at(0);
+    }
+
+    template <CircularBufferElement T>
+    const auto& CircularBuffer<T>::front() const
+    {
+        if (empty()) {
+            throw error::BufferEmpty{ capacity() };
+        }
+        return at(0);
+    }
+
+    template <CircularBufferElement T>
     auto& CircularBuffer<T>::back()
     {
-        if (size() == 0) {
-            throw std::out_of_range{ "Buffer is empty" };
+        if (empty()) {
+            throw error::BufferEmpty{ capacity() };
         }
         return at(size() - 1);
     }
@@ -659,8 +620,8 @@ namespace circbuf
     template <CircularBufferElement T>
     const auto& CircularBuffer<T>::back() const
     {
-        if (size() == 0) {
-            throw std::out_of_range{ "Buffer is empty" };
+        if (empty()) {
+            throw error::BufferEmpty{ capacity() };
         }
         return at(size() - 1);
     }
@@ -688,7 +649,7 @@ namespace circbuf
     class CircularBuffer<T>::Iterator
     {
     public:
-        // STL compatibility
+        // STL compatibility/compliance [breaking my style, big sad...]
         using iterator          = Iterator<false>;
         using const_iterator    = Iterator<true>;
         using iterator_category = std::random_access_iterator_tag;
@@ -766,16 +727,16 @@ namespace circbuf
 
         reference operator*() const
         {
-            if (m_buffer == nullptr || m_index == CircularBuffer::npos) {
-                throw std::out_of_range{ "Iterator is out of range" };
+            if (m_buffer == nullptr or m_index == CircularBuffer::npos) {
+                throw error::OutOfRange{ "Iterator is out of range", m_index, m_size };
             }
             return m_buffer->at(m_index);
         };
 
         pointer operator->() const
         {
-            if (m_buffer == nullptr || m_index == CircularBuffer::npos) {
-                throw std::out_of_range{ "Iterator is out of range" };
+            if (m_buffer == nullptr or m_index == CircularBuffer::npos) {
+                throw error::OutOfRange{ "Iterator is out of range", m_index, m_size };
             }
 
             return &m_buffer->at(m_index);
