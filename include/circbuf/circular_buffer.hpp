@@ -8,24 +8,9 @@
 #include <cstddef>
 #include <format>
 #include <limits>
-#include <optional>
 #include <span>
 #include <type_traits>
 #include <utility>
-
-#ifdef CIRCBUF_NO_STL_COMPATIBILITY_METHODS
-#    undef CIRCBUF_NO_STL_COMPATIBILITY_METHODS
-#    define CIRCBUF_NO_STL_COMPATIBILITY_METHODS 1
-#else
-#    define CIRCBUF_NO_STL_COMPATIBILITY_METHODS 0
-#endif
-
-#if CIRCBUF_NO_STL_COMPATIBILITY_METHODS
-#    define push_back  pushBack
-#    define push_front pushFront
-#    define pop_back   popBack
-#    define pop_front  popFront
-#endif
 
 namespace circbuf
 {
@@ -75,7 +60,7 @@ namespace circbuf
 
         using Element = T;
 
-        // STL compatibility
+        // STL compatibility/compliance [breaking my style, big sad...]
         using value_type      = Element;
         using iterator        = Iterator<false>;
         using const_iterator  = Iterator<true>;
@@ -98,17 +83,12 @@ namespace circbuf
         CircularBuffer& operator=(const CircularBuffer& other)
             requires std::copyable<T>;
 
+        BufferPolicy& policy() noexcept { return m_policy; }
+
         void swap(CircularBuffer& other) noexcept;
         void clear() noexcept;
 
-        void resize(std::size_t newCapacity, BufferResizePolicy policy = BufferResizePolicy::DiscardOld);
-
-        BufferPolicy getPolicy() const noexcept { return m_policy; };
-
-        void setPolicy(
-            std::optional<BufferCapacityPolicy> storagePolicy,
-            std::optional<BufferStorePolicy>    storePolicy
-        ) noexcept;
+        void resize(std::size_t new_capacity, BufferResizePolicy policy = BufferResizePolicy::DiscardOld);
 
         T& insert(std::size_t pos, T&& value, BufferInsertPolicy policy = BufferInsertPolicy::DiscardHead);
         T  remove(std::size_t pos);
@@ -123,9 +103,8 @@ namespace circbuf
 
         CircularBuffer& linearize() noexcept;
 
-        // copied buffer will have the policy set using the parameter if it is not std::nullopt else it will
-        // have the same policy as the original buffer
-        [[nodiscard]] CircularBuffer linearizeCopy(std::optional<BufferPolicy> policy = {}) const noexcept
+        // copied buffer will have the policy set to the parameter
+        [[nodiscard]] CircularBuffer linearize_copy(BufferPolicy policy) const noexcept
             requires std::copyable<T>;
 
         std::size_t size() const noexcept;
@@ -187,13 +166,14 @@ namespace circbuf
     template <CircularBufferElement T>
     CircularBuffer<T>::CircularBuffer(const CircularBuffer& other)
         requires std::copyable<T>
-        : m_buffer{ other.m_buffer.size() }
-        , m_head{ other.m_head }
-        , m_tail{ other.m_tail }
+        : m_buffer{ other.capacity() }
+        , m_head{ 0 }
+        , m_tail{ other.size() }
         , m_policy{ other.m_policy }
     {
-        for (std::size_t i = 0; i < size(); ++i) {
-            m_buffer.construct(i, T{ other.m_buffer.at(i) });    // copy performed here
+        std::size_t pos = 0;
+        for (const auto& copy : other) {
+            m_buffer.construct(pos++, T{ copy });    // copy performed here
         }
     }
 
@@ -207,7 +187,16 @@ namespace circbuf
 
         clear();
 
-        swap(CircularBuffer{ other });    // copy-and-swap idiom
+        m_buffer = detail::RawBuffer<T>{ other.capacity() };
+        m_head   = 0;
+        m_tail   = other.size();
+        m_policy = other.m_policy;
+
+        std::size_t pos = 0;
+        for (const auto& copy : other) {
+            m_buffer.construct(pos++, T{ copy });    // copy performed here
+        }
+
         return *this;
     }
 
@@ -258,31 +247,31 @@ namespace circbuf
     }
 
     // TODO: add condition when
-    // - size < capacity && size < newCapacity
-    // - size < capacity && size > newCpacity
+    // - size < capacity && size < new_capacity
+    // - size < capacity && size > new_capacity
     template <CircularBufferElement T>
-    void CircularBuffer<T>::resize(std::size_t newCapacity, BufferResizePolicy policy)
+    void CircularBuffer<T>::resize(std::size_t new_capacity, BufferResizePolicy policy)
     {
-        if (newCapacity == 0) {
+        if (new_capacity == 0) {
             clear();
             m_tail = npos;
             return;
         }
 
-        if (newCapacity == capacity()) {
+        if (new_capacity == capacity()) {
             return;
         }
 
         if (size() == 0) {
-            m_buffer = detail::RawBuffer<T>{ newCapacity };
+            m_buffer = detail::RawBuffer<T>{ new_capacity };
             m_head   = 0;
             m_tail   = 0;
 
             return;
         }
 
-        if (newCapacity > capacity()) {
-            detail::RawBuffer<T> buffer{ newCapacity };
+        if (new_capacity > capacity()) {
+            detail::RawBuffer<T> buffer{ new_capacity };
             for (std::size_t i = 0; i < size(); ++i) {
                 auto idx = (m_head + i) % capacity();
                 buffer.construct(i, std::move(m_buffer.at(idx)));
@@ -296,14 +285,14 @@ namespace circbuf
             return;
         }
 
-        auto buffer = detail::RawBuffer<T>{ newCapacity };
+        auto buffer = detail::RawBuffer<T>{ new_capacity };
         auto count  = size();
-        auto offset = count <= newCapacity ? 0ul : count - newCapacity;
+        auto offset = count <= new_capacity ? 0ul : count - new_capacity;
 
         switch (policy) {
         case BufferResizePolicy::DiscardOld: {
             auto begin = (m_head + offset) % capacity();
-            for (std::size_t i = 0; i < std::min(newCapacity, count); ++i) {
+            for (std::size_t i = 0; i < std::min(new_capacity, count); ++i) {
                 auto idx = (begin + i) % capacity();
                 buffer.construct(i, std::move(m_buffer.at(idx)));
                 m_buffer.destroy(idx);
@@ -312,7 +301,7 @@ namespace circbuf
         case BufferResizePolicy::DiscardNew: {
             auto end = m_tail == npos ? m_head : m_tail;
             end      = (end + capacity() - offset) % capacity();
-            for (auto i = std::min(newCapacity, count); i-- > 0;) {
+            for (auto i = std::min(new_capacity, count); i-- > 0;) {
                 end = (end + capacity() - 1) % capacity();
                 buffer.construct(i, std::move(m_buffer.at(end)));
                 m_buffer.destroy(end);
@@ -322,22 +311,7 @@ namespace circbuf
 
         m_buffer = std::move(buffer);
         m_head   = 0;
-        m_tail   = count <= newCapacity ? count : npos;
-    }
-
-    template <CircularBufferElement T>
-    void CircularBuffer<T>::setPolicy(
-        std::optional<BufferCapacityPolicy> storagePolicy,
-        std::optional<BufferStorePolicy>    storePolicy
-    ) noexcept
-    {
-        if (storagePolicy.has_value()) {
-            m_policy.m_capacity = storagePolicy.value();
-        }
-
-        if (storePolicy.has_value()) {
-            m_policy.m_store = storePolicy.value();
-        }
+        m_tail   = count <= new_capacity ? count : npos;
     }
 
     template <CircularBufferElement T>
@@ -541,7 +515,6 @@ namespace circbuf
     template <CircularBufferElement T>
     T CircularBuffer<T>::pop_back()
     {
-        // TODO: implement
         if (size() == 0) {
             throw std::out_of_range{ "Buffer is empty" };
         }
@@ -564,25 +537,60 @@ namespace circbuf
     template <CircularBufferElement T>
     CircularBuffer<T>& CircularBuffer<T>::linearize() noexcept
     {
-        if (linearized()) {
+        if (linearized() or empty()) {
             return *this;
         }
 
-        std::rotate(m_buffer.data(), m_buffer.data() + m_head, m_buffer.data() + capacity());
-        m_tail = m_tail != npos ? (m_tail + capacity() - m_head) % capacity() : npos;
+        if (full()) {
+            std::rotate(m_buffer.data(), m_buffer.data() + m_head, m_buffer.data() + capacity());
+            return *this;
+        }
 
-        m_head = 0;
+        auto prev_size = size();
+
+        if (m_head < m_tail or m_tail == 0)
+        // - the initialized memory is contiguous, the uninitialized memory is split between them
+        // - the uninitialized memory is at the beginning of the buffer
+        {
+            // we can go straight to moving the initialized memory to the beginning of the buffer
+            std::size_t start = 0;
+            std::size_t end   = m_tail == 0 ? capacity() : m_tail;
+            for (std::size_t i = m_head; i < end; ++i) {
+                m_buffer.construct(start++, std::move(m_buffer.at(i)));
+                m_buffer.destroy(i);
+            }
+
+            m_head = 0;
+            m_tail = prev_size;
+        } else
+        // - the uninitialized memory is contiguous, the initialized memory is split between them
+        {
+            // TODO: find out more efficient way to do this
+
+            // we need to move the uninitialized memory "hole" to the end of the buffer first
+            auto uninit_start = m_tail;
+            auto uninit_size  = capacity() - prev_size;
+
+            for (std::size_t i = m_head; i < capacity(); ++i) {
+                m_buffer.construct(uninit_start++, std::move(m_buffer.at(i)));
+                m_buffer.destroy(i);
+            }
+
+            std::rotate(m_buffer.data(), m_buffer.data() + m_head - uninit_size, m_buffer.data() + prev_size);
+
+            m_head = 0;
+            m_tail = prev_size;
+        }
 
         return *this;
     }
 
     template <CircularBufferElement T>
-    CircularBuffer<T> CircularBuffer<T>::linearizeCopy(std::optional<BufferPolicy> policy) const noexcept
+    CircularBuffer<T> CircularBuffer<T>::linearize_copy(BufferPolicy policy) const noexcept
         requires std::copyable<T>
     {
-        auto copy      = CircularBuffer{ *this };
-        auto newPolicy = policy.value_or(m_policy);
-        copy.setPolicy(newPolicy.m_capacity, newPolicy.m_store);
+        auto copy     = CircularBuffer{ *this };
+        copy.m_policy = policy;
 
         return copy;
     }
@@ -598,7 +606,8 @@ namespace circbuf
     {
         if (not linearized() and not full()) {
             throw std::logic_error{
-                "The underlying buffer is not linearized, reading will trigger undefined behavior"
+                "The underlying buffer is not linearized and not full, reading will trigger undefined "
+                "behavior",
             };
         }
         return { m_buffer.data(), size() };
@@ -609,7 +618,8 @@ namespace circbuf
     {
         if (not linearized() and not full()) {
             throw std::logic_error{
-                "The underlying buffer is not linearized, reading will trigger undefined behavior"
+                "The underlying buffer is not linearized and not full, reading will trigger undefined "
+                "behavior",
             };
         }
         return { m_buffer.data(), size() };
@@ -712,6 +722,7 @@ namespace circbuf
 
         // just a pointer comparison
         auto operator<=>(const Iterator&) const = default;
+        bool operator==(const Iterator&) const  = default;
 
         Iterator& operator+=(difference_type n)
         {
@@ -790,12 +801,5 @@ namespace circbuf
         std::size_t m_size   = 0;
     };
 }
-
-#if CIRCBUF_NO_STL_COMPATIBILITY_METHODS
-#    undef push_back pushBack
-#    undef push_front pushFront
-#    undef pop_back popBack
-#    undef pop_front popFront
-#endif
 
 #endif /* end of include guard: CIRCBUF_CIRCULAR_BUFFER_HPP */

@@ -11,6 +11,7 @@
 #        define CIRCBUF_RAW_BUFFER_DEBUG 0
 #    else
 #        define CIRCBUF_RAW_BUFFER_DEBUG 1
+#        include <vector>
 #        include <algorithm>
 #    endif
 #endif
@@ -55,7 +56,7 @@ namespace circbuf::detail
         std::size_t m_size = 0;
 
 #if CIRCBUF_RAW_BUFFER_DEBUG
-        std::unique_ptr<bool[]> m_constructed = std::make_unique<bool[]>(m_size);
+        std::vector<bool> m_constructed = {};
 #endif
     };
 }
@@ -70,10 +71,10 @@ namespace circbuf::detail
     RawBuffer<T>::RawBuffer(std::size_t size)
         : m_data{ m_allocator.allocate(size) }
         , m_size{ size }
-    {
 #if CIRCBUF_RAW_BUFFER_DEBUG
-        std::fill(m_constructed.get(), m_constructed.get() + size, false);
+        , m_constructed(size, false)
 #endif
+    {
     }
 
     template <typename T>
@@ -86,9 +87,7 @@ namespace circbuf::detail
 #if CIRCBUF_RAW_BUFFER_DEBUG
         assert(
             std::all_of(
-                m_constructed.get(),
-                m_constructed.get() + m_size,
-                [](bool constructed) { return !constructed; }
+                m_constructed.begin(), m_constructed.end(), [](bool constructed) { return !constructed; }
             )
             && "Not all elements are destructed"
         );
@@ -103,7 +102,7 @@ namespace circbuf::detail
         : m_data{ std::exchange(other.m_data, nullptr) }
         , m_size{ std::exchange(other.m_size, 0) }
 #if CIRCBUF_RAW_BUFFER_DEBUG
-        , m_constructed{ std::exchange(other.m_constructed, nullptr) }
+        , m_constructed{ std::exchange(other.m_constructed, {}) }
 #endif
     {
     }
@@ -123,7 +122,7 @@ namespace circbuf::detail
         m_size = std::exchange(other.m_size, 0);
 
 #if CIRCBUF_RAW_BUFFER_DEBUG
-        m_constructed = std::exchange(other.m_constructed, nullptr);
+        m_constructed = std::exchange(other.m_constructed, {});
 #endif
 
         return *this;

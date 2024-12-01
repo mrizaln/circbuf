@@ -98,7 +98,7 @@ The underlying buffer can be accessed using the member function `data()`, which 
   int main() {
       auto queue = CircularBuffer<int>{ 12 };
 
-      for (auto i : std::ranges::iota(0, 10)) {
+      for (auto i : std::ranges::iota(0, 14)) {
           queue.push_back(i);
       }
       assert(not queue.empty());
@@ -106,12 +106,18 @@ The underlying buffer can be accessed using the member function `data()`, which 
       auto span = queue.linearize().data();
       assert(queue.linearized());
 
-      // linearize() function is in-place, use linearizeCopy() to make a copy instead
-      auto copy = queue.linearizeCopy();
+      queue.pop_front();
+      queue.pop_front();
+
+      // linearize() function is in-place, use the copy ctor to make a copy instead (policy inherited)
+      auto copy = queue;
       assert(copy.linearized());
 
-      // copying in general will also linearize the resulting buffer
-      auto copy2 = queue;
+      // or linearize_copy() to make a copy instead, you can change the policy here
+      auto copy2 = queue.linearize_copy({
+          .m_capacity = circbuf::BufferCapacityPolicy::DynamicCapacity,
+          .m_store    = circbuf::BufferStorePolicy::ThrowOnFull,    // doesn't matter
+      });
       assert(copy2.linearized());
   }
   ```

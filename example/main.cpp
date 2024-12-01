@@ -40,9 +40,16 @@ void underlying()
     {
         auto queue = CircularBuffer<int>{ 12 };
 
-        for (auto i : sv::iota(0, 10)) {
+        for (auto i : sv::iota(0, 14)) {
             queue.push_back(i);
         }
+
+        queue.at(0) = 0;
+        queue.pop_front();
+        queue.at(0) = 0;
+        queue.pop_front();
+        queue.at(0) = 0;
+        queue.pop_front();
 
         assert(not queue.empty());
 
@@ -51,12 +58,17 @@ void underlying()
 
         assert(queue.linearized());
 
-        // linearize() function is in-place, use linearizeCopy() to make a copy instead
-        auto copy = queue.linearizeCopy();
+        queue.pop_front();
+
+        // linearize() function is in-place, use the copy ctor to make a copy instead (policy inherited)
+        auto copy = queue;
         assert(copy.linearized());
 
-        // copying in general will also linearize the resulting buffer
-        auto copy2 = queue;
+        // or linearize_copy() to make a copy instead, you can change the policy here
+        auto copy2 = queue.linearize_copy({
+            .m_capacity = circbuf::BufferCapacityPolicy::DynamicCapacity,
+            .m_store    = circbuf::BufferStorePolicy::ThrowOnFull,    // doesn't matter
+        });
         assert(copy2.linearized());
     }
 
@@ -69,7 +81,8 @@ void underlying()
 
         assert(queue.full());
 
-        // if you want the data to be whatever order in the underlying buffer, no need for linearize
+        // if you want the data to be whatever order in the underlying buffer, no need for linearize, though
+        // make sure the buffer is full before doing this
         auto raw = queue.data();
         print(raw);
 

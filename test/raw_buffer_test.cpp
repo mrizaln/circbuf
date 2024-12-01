@@ -19,7 +19,7 @@ void test()
     using namespace ut::literals;
     using ut::expect, ut::that;
 
-    Type::resetActiveInstanceCount();
+    Type::reset_active_instance_count();
 
     "nrvo should happen"_test = [] {
         circbuf::detail::RawBuffer<Type> buffer{ 10 };
@@ -33,7 +33,7 @@ void test()
             fmt::println("stat: {}", value.stat());
         }
 
-        if constexpr (Type::s_movable or Type::s_copyable) {
+        if constexpr (Type::is_movable() or Type::is_copyable()) {
             for (auto i : rv::iota(0u, 10u)) {
                 auto value = std::move(buffer.at(i));
                 expect(that % value.value() == 10 - i + 1);
@@ -49,11 +49,12 @@ void test()
         }
     };
 
-    // unbalanced constructor/destructor means there is a bug in the code
-    assert(Type::activeInstanceCount() == 0);
+    "unbalanced constructor/destructor means there is a bug in the code"_test = [] {
+        expect(Type::active_instance_count() == 0_i) << "Unbalanced ctor/dtor detected!";
+    };
 }
 
 int main()
 {
-    test_util::forEach<test_util::NonTrivialPermutations>([]<typename T>() { test<T>(); });
+    test_util::for_each_tuple<test_util::NonTrivialPermutations>([]<typename T>() { test<T>(); });
 }
