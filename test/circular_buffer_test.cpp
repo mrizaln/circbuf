@@ -27,9 +27,7 @@ static constexpr std::tuple g_policy_permutations = {
 };
 
 // TODO: check whether copy happens on operations that should not copy (unless type is not movable)
-// TODO: add test for pop_front on DynamicCapacity policy; check when will it double or halve its capacity
 // TODO: add test for edge case: 1 digit capacity
-// TODO: add test for insertion with DiscardTail policy and DynamicCapacity and ThrowOnFull + FixedCapacity
 template <test_util::TestClass Type>
 void test()
 {
@@ -331,6 +329,40 @@ void test()
             auto buffer3 = buffer2;
             expect(buffer3.size() == 10_i);
             expect(rr::equal(buffer3, buffer));
+        };
+
+        "copying buffer with non-zero capacity but zero element should success"_test = [] {
+            auto buffer = circbuf::CircularBuffer<Type>{ 10 };
+            auto copy   = buffer;
+
+            expect(that % buffer.capacity() == copy.capacity());
+            expect(that % copy.capacity() == 10);
+            expect(that % copy.size() == 0);
+        };
+
+        "copying buffer with non-zero capacity but partially filled should success"_test = [] {
+            auto buffer = circbuf::CircularBuffer<Type>{ 10 };
+            populate_container(buffer, rv::iota(0, 5));
+
+            auto copy = buffer;
+
+            expect(that % buffer.capacity() == copy.capacity());
+            expect(that % copy.capacity() == 10);
+            expect(that % copy.size() == 5);
+        };
+
+        "copying buffer with non-zero capacity but partially filled but once full should success"_test = [] {
+            auto buffer = circbuf::CircularBuffer<Type>{ 10 };
+            populate_container(buffer, rv::iota(0, 15));
+            for (auto _ : rv::iota(0, 5)) {
+                buffer.pop_front();
+            }
+
+            auto copy = buffer;
+
+            expect(that % buffer.capacity() == copy.capacity());
+            expect(that % copy.capacity() == 10);
+            expect(that % copy.size() == 5);
         };
     }
 
