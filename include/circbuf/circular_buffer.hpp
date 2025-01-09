@@ -671,6 +671,11 @@ namespace circbuf
             , m_index{ current }
             , m_size{ buffer->size() }
         {
+            // this line fix zero element iterator not equal to end iterator thus illegal access uninitialized
+            // element
+            if (current >= m_size) {
+                m_index = CircularBuffer::npos;
+            }
         }
 
         // for const iterator construction from iterator
