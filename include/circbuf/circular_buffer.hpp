@@ -547,7 +547,9 @@ namespace circbuf
     template <CircularBufferElement T>
     std::size_t CircularBuffer<T>::size() const noexcept
     {
-        return m_tail == npos ? capacity() : (m_tail + capacity() - m_head) % capacity();
+        return capacity() == 0 ? 0
+             : m_tail == npos  ? capacity()
+                               : (m_tail + capacity() - m_head) % capacity();
     }
 
     template <CircularBufferElement T>

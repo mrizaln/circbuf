@@ -331,6 +331,15 @@ void test()
             expect(rr::equal(buffer3, buffer));
         };
 
+        "copying buffer with zero capacity should success"_test = [] {
+            auto buffer = circbuf::CircularBuffer<Type>{ 0 };
+            auto copy   = buffer;
+
+            expect(that % buffer.capacity() == copy.capacity());
+            expect(that % copy.capacity() == 0);
+            expect(that % copy.size() == 0);
+        };
+
         "copying buffer with non-zero capacity but zero element should success"_test = [] {
             auto buffer = circbuf::CircularBuffer<Type>{ 10 };
             auto copy   = buffer;
