@@ -26,6 +26,11 @@ static constexpr std::tuple g_policy_permutations = {
     circbuf::BufferPolicy::ThrowOnFull,
 };
 
+static constexpr std::tuple g_resize_policy_permutations = {
+    circbuf::BufferResizePolicy::DiscardOld,
+    circbuf::BufferResizePolicy::DiscardNew,
+};
+
 // TODO: check whether copy happens on operations that should not copy (unless type is not movable)
 // TODO: add test for edge case: 1 digit capacity
 template <test_util::TestClass Type>
@@ -287,7 +292,7 @@ void test()
     };
 
     "default initialized CircBuf is basically useless"_test = [] {
-        auto buffer = circbuf::CircBuf<int>{};
+        auto buffer = circbuf::CircBuf<Type>{};
         expect(buffer.size() == 0_i);
         expect(buffer.capacity() == 0_i);
 
@@ -296,6 +301,32 @@ void test()
         expect(throws<ZeroCapacity>([&] { buffer.push_back(42); })) << "throw when push to empty buffer";
         expect(throws<BufferEmpty>([&] { buffer.pop_front(); })) << "throw when pop from empty buffer";
     };
+
+    "resize to a bigger capacity should success"_test = [] {
+        auto buffer = circbuf::CircBuf<Type>{ 24 };
+        populate_container(buffer, rv::iota(0, 44));
+        for (auto _ : rv::iota(0, 6)) {
+            buffer.pop_front();
+        }
+
+        buffer.resize(30);
+        expect(buffer.size() == 18_u);
+        expect(buffer.capacity() == 30_u);
+    };
+
+    "resize to smaller capacity should success"_test = [](circbuf::BufferResizePolicy policy) {
+        auto buffer = circbuf::CircBuf<Type>{ 24 };
+        populate_container(buffer, rv::iota(0, 33));
+        for (auto _ : rv::iota(0, 4)) {
+            buffer.pop_front();
+        }
+
+        buffer.resize(20, policy);
+        expect(buffer.size() == 20_u);
+        expect(buffer.capacity() == 20_u);
+        expect(buffer.back().value() == 32_i);
+        expect(equal_underlying<Type>(buffer, rv::iota(33 - 20, 33)));
+    } | g_resize_policy_permutations;
 
     "move should leave buffer into an empty state that is not usable"_test = [] {
         auto buffer = circbuf::CircBuf<Type>{ 20 };

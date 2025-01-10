@@ -262,7 +262,7 @@ namespace circbuf
             for (std::size_t i = 0; i < size(); ++i) {
                 auto idx = (m_head + i) % capacity();
                 buffer.construct(i, std::move(m_buffer.at(idx)));
-                m_buffer.destroy(i);
+                m_buffer.destroy(idx);
             }
 
             m_tail   = m_tail == npos ? capacity() : (m_tail + capacity() - m_head) % capacity();
@@ -298,7 +298,7 @@ namespace circbuf
 
         m_buffer = std::move(buffer);
         m_head   = 0;
-        m_tail   = count <= new_capacity ? count : npos;
+        m_tail   = count < new_capacity ? count : npos;
     }
 
     template <CircBufElement T>
