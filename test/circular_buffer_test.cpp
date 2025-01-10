@@ -373,6 +373,17 @@ void test()
             expect(that % copy.capacity() == 10);
             expect(that % copy.size() == 5);
         };
+
+        "copying a buffer which is fully filled should success"_test = [] {
+            auto buffer = circbuf::CircularBuffer<Type>{ 10 };
+            populate_container(buffer, rv::iota(0, 15));
+
+            auto copy = buffer;
+
+            expect(that % buffer.capacity() == copy.capacity());
+            expect(that % copy.capacity() == 10);
+            expect(that % copy.size() == 10);
+        };
     }
 
     "unbalanced constructor/destructor means there is a bug in the code"_test = [] {

@@ -155,7 +155,7 @@ namespace circbuf
         requires std::copyable<T>
         : m_buffer{ other.capacity() }
         , m_head{ 0 }
-        , m_tail{ other.size() }
+        , m_tail{ other.full() ? npos : other.size() }
         , m_policy{ other.m_policy }
     {
         std::size_t pos = 0;
@@ -176,7 +176,7 @@ namespace circbuf
 
         m_buffer = detail::RawBuffer<T>{ other.capacity() };
         m_head   = 0;
-        m_tail   = other.size();
+        m_tail   = other.full() ? npos : other.size();
         m_policy = other.m_policy;
 
         std::size_t pos = 0;
