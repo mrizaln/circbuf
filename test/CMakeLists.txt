@@ -31,4 +31,4 @@ endfunction()
 
 enable_testing()
 make_test(raw_buffer_test)
-make_test(circular_buffer_test)
+make_test(circbuf_test)

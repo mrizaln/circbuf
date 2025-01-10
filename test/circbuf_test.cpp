@@ -1,6 +1,6 @@
 #include "test_util.hpp"
 
-#include <circbuf/circular_buffer.hpp>
+#include <circbuf/circbuf.hpp>
 
 #include <boost/ut.hpp>
 #include <fmt/core.h>
@@ -38,15 +38,15 @@ void test()
     Type::reset_active_instance_count();
 
     "iterator should be a random access iterator"_test = [] {
-        using Iter = circbuf::CircularBuffer<Type>::template Iterator<false>;
+        using Iter = circbuf::CircBuf<Type>::template Iterator<false>;
         static_assert(std::random_access_iterator<Iter>);
 
-        using ConstIter = circbuf::CircularBuffer<Type>::template Iterator<true>;
+        using ConstIter = circbuf::CircBuf<Type>::template Iterator<true>;
         static_assert(std::random_access_iterator<ConstIter>);
     };
 
     "push_back should add an element to the back"_test = [](circbuf::BufferPolicy policy) {
-        auto buffer = circbuf::CircularBuffer<Type>{ 10, policy };
+        auto buffer = circbuf::CircBuf<Type>{ 10, policy };
 
         // first push
         auto  size  = buffer.size();
@@ -78,7 +78,7 @@ void test()
 
     "push_back with ReplaceOnFull policy should replace the adjacent element when buffer is full"_test = [] {
         auto policy = circbuf::BufferPolicy::ReplaceOnFull;
-        auto buffer = circbuf::CircularBuffer<Type>{ 10, policy };
+        auto buffer = circbuf::CircBuf<Type>{ 10, policy };
 
         // fully populate buffer
         populate_container(buffer, rv::iota(0, 10));
@@ -107,7 +107,7 @@ void test()
 
     "push_back with ThrowOnFull policy should throw when buffer is full"_test = [] {
         auto policy = circbuf::BufferPolicy::ThrowOnFull;
-        auto buffer = circbuf::CircularBuffer<Type>{ 10, policy };
+        auto buffer = circbuf::CircBuf<Type>{ 10, policy };
 
         // fully populate buffer
         populate_container(buffer, rv::iota(0, 10));
@@ -119,7 +119,7 @@ void test()
     };
 
     "push_front should add an element to the front"_test = [](circbuf::BufferPolicy policy) {
-        auto buffer = circbuf::CircularBuffer<Type>{ 10, policy };
+        auto buffer = circbuf::CircBuf<Type>{ 10, policy };
 
         // first push
         auto  size  = buffer.size();
@@ -151,7 +151,7 @@ void test()
 
     "push_front with ReplaceOnFull policy should replace the adjacent element when buffer is full"_test = [] {
         auto policy = circbuf::BufferPolicy::ReplaceOnFull;
-        auto buffer = circbuf::CircularBuffer<Type>{ 10, policy };
+        auto buffer = circbuf::CircBuf<Type>{ 10, policy };
 
         // fully populate buffer
         populate_container_front(buffer, rv::iota(0, 10));
@@ -181,7 +181,7 @@ void test()
 
     "push_front with ThrowOnFull policy should throw when buffer is full"_test = [] {
         auto policy = circbuf::BufferPolicy::ThrowOnFull;
-        auto buffer = circbuf::CircularBuffer<Type>{ 10, policy };
+        auto buffer = circbuf::CircBuf<Type>{ 10, policy };
 
         // fully populate buffer
         populate_container_front(buffer, rv::iota(0, 10));
@@ -194,7 +194,7 @@ void test()
 
     "pop_front should remove the first element on the buffer"_test = [](circbuf::BufferPolicy policy) {
         auto values = std::array{ 42, 0, 1, 2, 3, 4, 5, 6, 7, 8 };
-        auto buffer = circbuf::CircularBuffer<Type>{ 10, policy };
+        auto buffer = circbuf::CircBuf<Type>{ 10, policy };
 
         for (auto value : values) {
             buffer.push_back(std::move(value));
@@ -220,7 +220,7 @@ void test()
     "insertion in the middle should move the elements around"_test = [] {
         // full buffer condition
         {
-            auto buffer = circbuf::CircularBuffer<Type>{ 10 };    // default policy
+            auto buffer = circbuf::CircBuf<Type>{ 10 };    // default policy
             populate_container(buffer, rv::iota(0, 10));
 
             buffer.insert(3, 42, circbuf::BufferInsertPolicy::DiscardHead);
@@ -243,7 +243,7 @@ void test()
 
         // partially filled buffer condition
         {
-            auto buffer = circbuf::CircularBuffer<Type>{ 10 };    // default policy
+            auto buffer = circbuf::CircBuf<Type>{ 10 };    // default policy
             populate_container(buffer, rv::iota(0, 15));
             for (auto _ : rv::iota(0, 5)) {
                 buffer.pop_front();
@@ -263,7 +263,7 @@ void test()
     };
 
     "removal should be able to remove value anywhere in the buffer"_test = [] {
-        auto buffer = circbuf::CircularBuffer<Type>{ 10 };    // default policy
+        auto buffer = circbuf::CircBuf<Type>{ 10 };    // default policy
         populate_container(buffer, rv::iota(0, 15));
 
         auto expected = std::vector{ 5, 6, 7, 8, 9, 10, 11, 12, 13, 14 };
@@ -286,8 +286,8 @@ void test()
         expect(equal_underlying<Type>(buffer, expected));
     };
 
-    "default initialized CircularBuffer is basically useless"_test = [] {
-        auto buffer = circbuf::CircularBuffer<int>{};
+    "default initialized CircBuf is basically useless"_test = [] {
+        auto buffer = circbuf::CircBuf<int>{};
         expect(buffer.size() == 0_i);
         expect(buffer.capacity() == 0_i);
 
@@ -298,7 +298,7 @@ void test()
     };
 
     "move should leave buffer into an empty state that is not usable"_test = [] {
-        auto buffer = circbuf::CircularBuffer<Type>{ 20 };
+        auto buffer = circbuf::CircBuf<Type>{ 20 };
         populate_container(buffer, rv::iota(0, 10));
 
         expect(buffer.size() == 10_i);
@@ -316,7 +316,7 @@ void test()
 
     if constexpr (std::copyable<Type>) {
         "copy should copy each element exactly"_test = [] {
-            auto buffer = circbuf::CircularBuffer<Type>{ 20 };
+            auto buffer = circbuf::CircBuf<Type>{ 20 };
             populate_container(buffer, rv::iota(0, 10));
 
             expect(buffer.size() == 10_i);
@@ -332,7 +332,7 @@ void test()
         };
 
         "copying buffer with zero capacity should success"_test = [] {
-            auto buffer = circbuf::CircularBuffer<Type>{ 0 };
+            auto buffer = circbuf::CircBuf<Type>{ 0 };
             auto copy   = buffer;
 
             expect(that % buffer.capacity() == copy.capacity());
@@ -341,7 +341,7 @@ void test()
         };
 
         "copying buffer with non-zero capacity but zero element should success"_test = [] {
-            auto buffer = circbuf::CircularBuffer<Type>{ 10 };
+            auto buffer = circbuf::CircBuf<Type>{ 10 };
             auto copy   = buffer;
 
             expect(that % buffer.capacity() == copy.capacity());
@@ -350,7 +350,7 @@ void test()
         };
 
         "copying buffer with non-zero capacity but partially filled should success"_test = [] {
-            auto buffer = circbuf::CircularBuffer<Type>{ 10 };
+            auto buffer = circbuf::CircBuf<Type>{ 10 };
             populate_container(buffer, rv::iota(0, 5));
 
             auto copy = buffer;
@@ -361,7 +361,7 @@ void test()
         };
 
         "copying buffer with non-zero capacity but partially filled but once full should success"_test = [] {
-            auto buffer = circbuf::CircularBuffer<Type>{ 10 };
+            auto buffer = circbuf::CircBuf<Type>{ 10 };
             populate_container(buffer, rv::iota(0, 15));
             for (auto _ : rv::iota(0, 5)) {
                 buffer.pop_front();
@@ -375,7 +375,7 @@ void test()
         };
 
         "copying a buffer which is fully filled should success"_test = [] {
-            auto buffer = circbuf::CircularBuffer<Type>{ 10 };
+            auto buffer = circbuf::CircBuf<Type>{ 10 };
             populate_container(buffer, rv::iota(0, 15));
 
             auto copy = buffer;
@@ -394,7 +394,7 @@ void test()
 int main()
 {
     test_util::for_each_tuple<test_util::NonTrivialPermutations>([]<typename T>() {
-        if constexpr (circbuf::CircularBufferElement<T>) {
+        if constexpr (circbuf::CircBufElement<T>) {
             test<T>();
         }
     });

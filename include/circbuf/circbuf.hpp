@@ -1,5 +1,5 @@
-#ifndef CIRCBUF_CIRCULAR_BUFFER_HPP
-#define CIRCBUF_CIRCULAR_BUFFER_HPP
+#ifndef CIRCBUF_CIRCBUF_HPP
+#define CIRCBUF_CIRCBUF_HPP
 
 #include "circbuf/detail/raw_buffer.hpp"
 #include "circbuf/error.hpp"
@@ -15,7 +15,7 @@
 namespace circbuf
 {
     template <typename T>
-    concept CircularBufferElement = std::movable<T> or std::copyable<T>;
+    concept CircBufElement = std::movable<T> or std::copyable<T>;
 
     enum class BufferResizePolicy
     {
@@ -36,8 +36,8 @@ namespace circbuf
         ThrowOnFull,      // fixed capacity, throw on full
     };
 
-    template <CircularBufferElement T>
-    class CircularBuffer
+    template <CircBufElement T>
+    class CircBuf
     {
     public:
         template <bool IsConst>
@@ -58,22 +58,22 @@ namespace circbuf
         using const_reference = const T&;
         using size_type       = std::size_t;
 
-        CircularBuffer() = default;
-        ~CircularBuffer() { clear(); };
+        CircBuf() = default;
+        ~CircBuf() { clear(); };
 
-        CircularBuffer(std::size_t capacity, BufferPolicy policy = BufferPolicy::ReplaceOnFull);
+        CircBuf(std::size_t capacity, BufferPolicy policy = BufferPolicy::ReplaceOnFull);
 
-        CircularBuffer(CircularBuffer&& other) noexcept;
-        CircularBuffer& operator=(CircularBuffer&& other) noexcept;
+        CircBuf(CircBuf&& other) noexcept;
+        CircBuf& operator=(CircBuf&& other) noexcept;
 
-        CircularBuffer(const CircularBuffer& other)
+        CircBuf(const CircBuf& other)
             requires std::copyable<T>;
-        CircularBuffer& operator=(const CircularBuffer& other)
+        CircBuf& operator=(const CircBuf& other)
             requires std::copyable<T>;
 
         BufferPolicy& policy() noexcept { return m_policy; }
 
-        void swap(CircularBuffer& other) noexcept;
+        void swap(CircBuf& other) noexcept;
         void clear() noexcept;
 
         void resize(std::size_t new_capacity, BufferResizePolicy policy = BufferResizePolicy::DiscardOld);
@@ -88,10 +88,10 @@ namespace circbuf
         T  pop_front();
         T  pop_back();
 
-        CircularBuffer& linearize() noexcept;
+        CircBuf& linearize() noexcept;
 
         // copied buffer will have the policy set to the parameter
-        [[nodiscard]] CircularBuffer linearize_copy(BufferPolicy policy) const noexcept
+        [[nodiscard]] CircBuf linearize_copy(BufferPolicy policy) const noexcept
             requires std::copyable<T>;
 
         std::size_t size() const noexcept;
@@ -141,8 +141,8 @@ namespace circbuf
 
 namespace circbuf
 {
-    template <CircularBufferElement T>
-    CircularBuffer<T>::CircularBuffer(std::size_t capacity, BufferPolicy policy)
+    template <CircBufElement T>
+    CircBuf<T>::CircBuf(std::size_t capacity, BufferPolicy policy)
         : m_buffer{ capacity }
         , m_head{ 0 }
         , m_tail{ capacity == 0 ? npos : 0 }
@@ -150,8 +150,8 @@ namespace circbuf
     {
     }
 
-    template <CircularBufferElement T>
-    CircularBuffer<T>::CircularBuffer(const CircularBuffer& other)
+    template <CircBufElement T>
+    CircBuf<T>::CircBuf(const CircBuf& other)
         requires std::copyable<T>
         : m_buffer{ other.capacity() }
         , m_head{ 0 }
@@ -164,8 +164,8 @@ namespace circbuf
         }
     }
 
-    template <CircularBufferElement T>
-    CircularBuffer<T>& CircularBuffer<T>::operator=(const CircularBuffer& other)
+    template <CircBufElement T>
+    CircBuf<T>& CircBuf<T>::operator=(const CircBuf& other)
         requires std::copyable<T>
     {
         if (this == &other) {
@@ -187,8 +187,8 @@ namespace circbuf
         return *this;
     }
 
-    template <CircularBufferElement T>
-    CircularBuffer<T>::CircularBuffer(CircularBuffer&& other) noexcept
+    template <CircBufElement T>
+    CircBuf<T>::CircBuf(CircBuf&& other) noexcept
         : m_buffer{ std::exchange(other.m_buffer, {}) }
         , m_head{ std::exchange(other.m_head, 0) }
         , m_tail{ std::exchange(other.m_tail, npos) }
@@ -196,8 +196,8 @@ namespace circbuf
     {
     }
 
-    template <CircularBufferElement T>
-    CircularBuffer<T>& CircularBuffer<T>::operator=(CircularBuffer&& other) noexcept
+    template <CircBufElement T>
+    CircBuf<T>& CircBuf<T>::operator=(CircBuf&& other) noexcept
     {
         if (this == &other) {
             return *this;
@@ -213,8 +213,8 @@ namespace circbuf
         return *this;
     }
 
-    template <CircularBufferElement T>
-    void CircularBuffer<T>::swap(CircularBuffer& other) noexcept
+    template <CircBufElement T>
+    void CircBuf<T>::swap(CircBuf& other) noexcept
     {
         std::swap(m_buffer, other.m_buffer);
         std::swap(m_head, other.m_head);
@@ -222,8 +222,8 @@ namespace circbuf
         std::swap(m_policy, other.m_policy);
     }
 
-    template <CircularBufferElement T>
-    void CircularBuffer<T>::clear() noexcept
+    template <CircBufElement T>
+    void CircBuf<T>::clear() noexcept
     {
         for (std::size_t i = 0; i < size(); ++i) {
             m_buffer.destroy((m_head + i) % capacity());
@@ -236,8 +236,8 @@ namespace circbuf
     // TODO: add condition when
     // - size < capacity && size < new_capacity
     // - size < capacity && size > new_capacity
-    template <CircularBufferElement T>
-    void CircularBuffer<T>::resize(std::size_t new_capacity, BufferResizePolicy policy)
+    template <CircBufElement T>
+    void CircBuf<T>::resize(std::size_t new_capacity, BufferResizePolicy policy)
     {
         if (new_capacity == 0) {
             clear();
@@ -301,8 +301,8 @@ namespace circbuf
         m_tail   = count <= new_capacity ? count : npos;
     }
 
-    template <CircularBufferElement T>
-    T& CircularBuffer<T>::insert(std::size_t pos, T&& value, BufferInsertPolicy policy)
+    template <CircBufElement T>
+    T& CircBuf<T>::insert(std::size_t pos, T&& value, BufferInsertPolicy policy)
     {
         if (capacity() == 0) {
             throw error::ZeroCapacity{ "Can't push to a buffer with zero capacity" };
@@ -348,8 +348,8 @@ namespace circbuf
         return *element;
     }
 
-    template <CircularBufferElement T>
-    T CircularBuffer<T>::remove(std::size_t pos)
+    template <CircBufElement T>
+    T CircBuf<T>::remove(std::size_t pos)
     {
         if (empty()) {
             throw error::BufferEmpty{ capacity() };
@@ -379,14 +379,14 @@ namespace circbuf
         return value;
     }
 
-    template <CircularBufferElement T>
-    T& CircularBuffer<T>::push_front(const T& value)
+    template <CircBufElement T>
+    T& CircBuf<T>::push_front(const T& value)
     {
         return push_front(T{ value });    // copy made here
     }
 
-    template <CircularBufferElement T>
-    T& CircularBuffer<T>::push_front(T&& value)
+    template <CircBufElement T>
+    T& CircBuf<T>::push_front(T&& value)
     {
         if (capacity() == 0) {
             throw error::ZeroCapacity{ "Can't push to a buffer with zero capacity" };
@@ -412,14 +412,14 @@ namespace circbuf
         return m_buffer.at(current);
     }
 
-    template <CircularBufferElement T>
-    T& CircularBuffer<T>::push_back(const T& value)
+    template <CircBufElement T>
+    T& CircBuf<T>::push_back(const T& value)
     {
         return push_back(T{ value });    // copy made here
     };
 
-    template <CircularBufferElement T>
-    T& CircularBuffer<T>::push_back(T&& value)
+    template <CircBufElement T>
+    T& CircBuf<T>::push_back(T&& value)
     {
         if (capacity() == 0) {
             throw error::ZeroCapacity{ "Can't push to a buffer with zero capacity" };
@@ -447,8 +447,8 @@ namespace circbuf
         return m_buffer.at(current);
     }
 
-    template <CircularBufferElement T>
-    T CircularBuffer<T>::pop_front()
+    template <CircBufElement T>
+    T CircBuf<T>::pop_front()
     {
         if (empty()) {
             throw error::BufferEmpty{ capacity() };
@@ -465,8 +465,8 @@ namespace circbuf
         return value;
     }
 
-    template <CircularBufferElement T>
-    T CircularBuffer<T>::pop_back()
+    template <CircBufElement T>
+    T CircBuf<T>::pop_back()
     {
         if (empty()) {
             throw error::BufferEmpty{ capacity() };
@@ -483,8 +483,8 @@ namespace circbuf
         return value;
     }
 
-    template <CircularBufferElement T>
-    CircularBuffer<T>& CircularBuffer<T>::linearize() noexcept
+    template <CircBufElement T>
+    CircBuf<T>& CircBuf<T>::linearize() noexcept
     {
         if (linearized() or empty()) {
             return *this;
@@ -534,26 +534,26 @@ namespace circbuf
         return *this;
     }
 
-    template <CircularBufferElement T>
-    CircularBuffer<T> CircularBuffer<T>::linearize_copy(BufferPolicy policy) const noexcept
+    template <CircBufElement T>
+    CircBuf<T> CircBuf<T>::linearize_copy(BufferPolicy policy) const noexcept
         requires std::copyable<T>
     {
-        auto copy     = CircularBuffer{ *this };
+        auto copy     = CircBuf{ *this };
         copy.m_policy = policy;
 
         return copy;
     }
 
-    template <CircularBufferElement T>
-    std::size_t CircularBuffer<T>::size() const noexcept
+    template <CircBufElement T>
+    std::size_t CircBuf<T>::size() const noexcept
     {
         return capacity() == 0 ? 0
              : m_tail == npos  ? capacity()
                                : (m_tail + capacity() - m_head) % capacity();
     }
 
-    template <CircularBufferElement T>
-    std::span<T> CircularBuffer<T>::data()
+    template <CircBufElement T>
+    std::span<T> CircBuf<T>::data()
     {
         if (not linearized() and not full()) {
             throw error::NotLinearizedNotFull{ "Reading the data will lead to undefined behavior" };
@@ -561,8 +561,8 @@ namespace circbuf
         return { m_buffer.data(), size() };
     }
 
-    template <CircularBufferElement T>
-    std::span<const T> CircularBuffer<T>::data() const
+    template <CircBufElement T>
+    std::span<const T> CircBuf<T>::data() const
     {
         if (not linearized() and not full()) {
             throw error::NotLinearizedNotFull{ "Reading the data will lead to undefined behavior" };
@@ -570,8 +570,8 @@ namespace circbuf
         return { m_buffer.data(), size() };
     }
 
-    template <CircularBufferElement T>
-    auto& CircularBuffer<T>::at(std::size_t pos)
+    template <CircBufElement T>
+    auto& CircBuf<T>::at(std::size_t pos)
     {
         if (pos >= size()) {
             throw error::OutOfRange{ "Can't access element outside of the range", pos, size() };
@@ -581,8 +581,8 @@ namespace circbuf
         return m_buffer.at(realpos);
     }
 
-    template <CircularBufferElement T>
-    const auto& CircularBuffer<T>::at(std::size_t pos) const
+    template <CircBufElement T>
+    const auto& CircBuf<T>::at(std::size_t pos) const
     {
         if (pos >= size()) {
             throw error::OutOfRange{ "Can't access element outside of the range", pos, size() };
@@ -592,8 +592,8 @@ namespace circbuf
         return m_buffer.at(realpos);
     }
 
-    template <CircularBufferElement T>
-    auto& CircularBuffer<T>::front()
+    template <CircBufElement T>
+    auto& CircBuf<T>::front()
     {
         if (empty()) {
             throw error::BufferEmpty{ capacity() };
@@ -601,8 +601,8 @@ namespace circbuf
         return at(0);
     }
 
-    template <CircularBufferElement T>
-    const auto& CircularBuffer<T>::front() const
+    template <CircBufElement T>
+    const auto& CircBuf<T>::front() const
     {
         if (empty()) {
             throw error::BufferEmpty{ capacity() };
@@ -610,8 +610,8 @@ namespace circbuf
         return at(0);
     }
 
-    template <CircularBufferElement T>
-    auto& CircularBuffer<T>::back()
+    template <CircBufElement T>
+    auto& CircBuf<T>::back()
     {
         if (empty()) {
             throw error::BufferEmpty{ capacity() };
@@ -619,8 +619,8 @@ namespace circbuf
         return at(size() - 1);
     }
 
-    template <CircularBufferElement T>
-    const auto& CircularBuffer<T>::back() const
+    template <CircBufElement T>
+    const auto& CircBuf<T>::back() const
     {
         if (empty()) {
             throw error::BufferEmpty{ capacity() };
@@ -628,8 +628,8 @@ namespace circbuf
         return at(size() - 1);
     }
 
-    template <CircularBufferElement T>
-    std::size_t CircularBuffer<T>::increment(std::size_t& index)
+    template <CircBufElement T>
+    std::size_t CircBuf<T>::increment(std::size_t& index)
     {
         if (++index == capacity()) {
             index = 0;
@@ -637,8 +637,8 @@ namespace circbuf
         return index;
     }
 
-    template <CircularBufferElement T>
-    std::size_t CircularBuffer<T>::decrement(std::size_t& index)
+    template <CircBufElement T>
+    std::size_t CircBuf<T>::decrement(std::size_t& index)
     {
         if (index-- == 0) {
             index = capacity() - 1;
@@ -646,9 +646,9 @@ namespace circbuf
         return index;
     }
 
-    template <CircularBufferElement T>
+    template <CircBufElement T>
     template <bool IsConst>
-    class CircularBuffer<T>::Iterator
+    class CircBuf<T>::Iterator
     {
     public:
         // STL compatibility/compliance [breaking my style, big sad...]
@@ -660,7 +660,7 @@ namespace circbuf
         using pointer           = std::conditional_t<IsConst, const value_type*, value_type*>;
         using reference         = std::conditional_t<IsConst, const value_type&, value_type&>;
 
-        using BufferPtr = std::conditional_t<IsConst, const CircularBuffer*, CircularBuffer*>;
+        using BufferPtr = std::conditional_t<IsConst, const CircBuf*, CircBuf*>;
 
         Iterator() noexcept                      = default;
         Iterator(const Iterator&)                = default;
@@ -676,7 +676,7 @@ namespace circbuf
             // this line fix zero element iterator not equal to end iterator thus illegal access uninitialized
             // element
             if (current >= m_size) {
-                m_index = CircularBuffer::npos;
+                m_index = CircBuf::npos;
             }
         }
 
@@ -700,7 +700,7 @@ namespace circbuf
 
             // detect wrap-around then set to sentinel value
             if (m_index >= m_size) {
-                m_index = CircularBuffer::npos;
+                m_index = CircBuf::npos;
             }
 
             return *this;
@@ -708,7 +708,7 @@ namespace circbuf
 
         Iterator& operator-=(difference_type n)
         {
-            if (m_index == CircularBuffer::npos) {
+            if (m_index == CircBuf::npos) {
                 m_index = m_size;
             }
 
@@ -734,7 +734,7 @@ namespace circbuf
 
         reference operator*() const
         {
-            if (m_buffer == nullptr or m_index == CircularBuffer::npos) {
+            if (m_buffer == nullptr or m_index == CircBuf::npos) {
                 throw error::OutOfRange{ "Iterator is out of range", m_index, m_size };
             }
             return m_buffer->at(m_index);
@@ -742,7 +742,7 @@ namespace circbuf
 
         pointer operator->() const
         {
-            if (m_buffer == nullptr or m_index == CircularBuffer::npos) {
+            if (m_buffer == nullptr or m_index == CircBuf::npos) {
                 throw error::OutOfRange{ "Iterator is out of range", m_index, m_size };
             }
 
@@ -757,17 +757,17 @@ namespace circbuf
 
         friend difference_type operator-(const Iterator& lhs, const Iterator& rhs)
         {
-            auto lpos = lhs.m_index == CircularBuffer::npos ? lhs.m_size : lhs.m_index;
-            auto rpos = rhs.m_index == CircularBuffer::npos ? rhs.m_size : rhs.m_index;
+            auto lpos = lhs.m_index == CircBuf::npos ? lhs.m_size : lhs.m_index;
+            auto rpos = rhs.m_index == CircBuf::npos ? rhs.m_size : rhs.m_index;
 
             return static_cast<difference_type>(lpos) - static_cast<difference_type>(rpos);
         }
 
     private:
         BufferPtr   m_buffer = nullptr;
-        std::size_t m_index  = CircularBuffer::npos;
+        std::size_t m_index  = CircBuf::npos;
         std::size_t m_size   = 0;
     };
 }
 
-#endif /* end of include guard: CIRCBUF_CIRCULAR_BUFFER_HPP */
+#endif /* end of include guard: CIRCBUF_CIRCBUF_HPP */

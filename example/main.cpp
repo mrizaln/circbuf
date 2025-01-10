@@ -1,4 +1,4 @@
-#include <circbuf/circular_buffer.hpp>
+#include <circbuf/circbuf.hpp>
 
 #include <iostream>
 #include <ranges>
@@ -6,7 +6,7 @@
 
 namespace sv = std::views;
 
-using circbuf::CircularBuffer;
+using circbuf::CircBuf;
 
 void print(std::ranges::range auto&& range)
 {
@@ -18,7 +18,7 @@ void print(std::ranges::range auto&& range)
 
 void simple()
 {
-    auto queue = CircularBuffer<std::string>{ 12 };
+    auto queue = CircBuf<std::string>{ 12 };
 
     for (auto i : std::views::iota(0, 256)) {
         queue.push_back(std::format("{0:0b}|{0}", i));
@@ -38,7 +38,7 @@ void simple()
 void underlying()
 {
     {
-        auto queue = CircularBuffer<int>{ 12 };
+        auto queue = CircBuf<int>{ 12 };
 
         for (auto i : sv::iota(0, 14)) {
             queue.push_back(i);
@@ -73,7 +73,7 @@ void underlying()
     }
 
     {
-        auto queue = CircularBuffer<int>{ 12 };
+        auto queue = CircBuf<int>{ 12 };
 
         for (auto i : sv::iota(0, 2373)) {
             queue.push_back(i);

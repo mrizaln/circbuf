@@ -24,18 +24,18 @@ target_link_libraries(main PRIVATE circbuf)
 > `main.cpp`
 
 ```cpp
-#include <circbuf/circular_buffer.hpp>
+#include <circbuf/circbuf.hpp>
 
 #include <iostream>
 #include <ranges>
 #include <string>
 
-using circbuf::CircularBuffer;
+using circbuf::CircBuf;
 
 int main()
 {
     // you specify the capacity of the buffer at construction (can be resized later)
-    auto queue = CircularBuffer<std::string>{ 12 };
+    auto queue = CircBuf<std::string>{ 12 };
 
     // pushing from the back
     for (auto i : std::views::iota(0, 256)) {
@@ -46,12 +46,12 @@ int main()
     queue.push_front("hello");
     queue.push_front("world");
 
-    // you can iterate the CircularBuffer from head to tail
+    // you can iterate the CircBuf from head to tail
     for (const auto& value : queue | std::views::reverse) {    // i reverse the iterator here
         std::cout << value << '\n';
     }
 
-    // CircularBuffer implements a random access iterator, so you should be able to access it like an array
+    // CircBuf implements a random access iterator, so you should be able to access it like an array
     auto mid = queue.remove(6);
     std::cout << ">>> mid: " << mid << '\n';
 
@@ -62,9 +62,25 @@ int main()
 }
 ```
 
+### Buffer policy
+
+You can set the behavior of the circular buffer between two options
+
+- `ReplaceOnFull`: replace the head with new value if `push_back` is called and replace the tail with new value if `push_front` is called (default).
+- `ThrowOnFull`: this will throw an error when a push/insert is done into a full buffer, you must `pop_front`/`pop_back` first before adding new item.
+
+```cpp
+auto buf = CircBuf<int>{ 42 };                              // use ReplaceOnFull by default
+buf.policy() = BufferPolicy::ThrowOnFull;                   // change the policy after construction
+
+auto buf2 = CircBuf<int>{ 42, BufferPolicy::ThrowOnFull }   // set to other policy on construction
+
+
+```
+
 ### Accessing underlying buffer
 
-`circbuf::CircularBuffer` is an array under the hood, so you should be able to see its underlying array. The caveat is that you should only access the underlying buffer if the buffer itself is said to be **_full_** and/or **_linearized_**.
+`circbuf::CircBuf` is an array under the hood, so you should be able to see its underlying array. The caveat is that you should only access the underlying buffer if the buffer itself is said to be **_full_** and/or **_linearized_**.
 
 The underlying buffer can be accessed using the member function `data()`, which will return an `std::span`.
 
@@ -77,7 +93,7 @@ The underlying buffer can be accessed using the member function `data()`, which 
 
   ```cpp
   int main() {
-      auto queue = CircularBuffer<int>{ 12 };
+      auto queue = CircBuf<int>{ 12 };
 
       for (auto i : std::views::iota(0, 2373)) {
           queue.push_back(i);
@@ -96,7 +112,7 @@ The underlying buffer can be accessed using the member function `data()`, which 
 
   ```cpp
   int main() {
-      auto queue = CircularBuffer<int>{ 12 };
+      auto queue = CircBuf<int>{ 12 };
 
       for (auto i : std::ranges::iota(0, 14)) {
           queue.push_back(i);
